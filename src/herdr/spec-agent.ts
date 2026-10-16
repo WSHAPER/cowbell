@@ -144,12 +144,18 @@ export function agentWait(
  * Start an agent. On 0.9.5 this REQUIRES a pre-existing pane
  * (`--kind KIND --pane ID`) — there is no `--cwd`/`--workspace`.
  * Pair with workspaceCreate + pane targeting.
+ *
+ * `model` compiles internally to `-- -m <model>` (the agent binary
+ * owns the flag vocabulary; herdr argv stays authoritative). It is
+ * exclusive with `args` — both at once is a validation error, no
+ * silent precedence. It is NOT checked against a live model list:
+ * spawn stays offline-safe, discovery is models_list's job.
  */
 export function agentStart(
   name: string,
   kind: AgentKind,
   pane: string,
-  opts: { timeoutMs?: number; args?: string[] } = {},
+  opts: { timeoutMs?: number; model?: string; args?: string[] } = {},
 ): Spec {
   if (arguments.length > 4) {
     throw new Error(
@@ -173,7 +179,8 @@ export function agentStart(
   ];
   if (opts.timeoutMs !== undefined)
     argv.push("--timeout", String(opts.timeoutMs));
-  if (opts.args !== undefined) argv.push("--", ...opts.args);
+  if (opts.model !== undefined) argv.push("--", "-m", opts.model);
+  else if (opts.args !== undefined) argv.push("--", ...opts.args);
   return { argv, surface: "agent start" };
 }
 

@@ -32,6 +32,15 @@ describe("opencode argv pins", () => {
       "order=asc",
     ]);
   });
+
+  it("modelList/modelDefault: bare operation ids, no params", () => {
+    expect(oc.modelList().argv).toEqual(["opencode", "api", "model.list"]);
+    expect(oc.modelDefault().argv).toEqual([
+      "opencode",
+      "api",
+      "model.default",
+    ]);
+  });
 });
 
 describe("opencode input validation", () => {

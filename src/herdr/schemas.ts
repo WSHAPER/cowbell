@@ -128,9 +128,18 @@ export const transport = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("remote"), sshTarget: nonEmptyText }).strict(),
 ]);
 
+/**
+ * A model selector for agent start, e.g. "zai/glm-5.3" or
+ * "zai/glm-5.3#high". Deliberately ONLY non-empty — it is never
+ * validated against a live model list: spawn must stay offline-safe,
+ * discovery is models_list's job (a separate, read-only tool).
+ */
+const agentModelId = z.string().min(1);
+
 export const agentStartOpts = z
   .object({
     timeoutMs: timeoutMs.optional(),
+    model: agentModelId.optional(),
     args: z
       .array(
         z
@@ -143,7 +152,11 @@ export const agentStartOpts = z
   })
   .strict()
   .optional()
-  .default({});
+  .default({})
+  .refine((v) => !(v.model !== undefined && v.args !== undefined), {
+    message:
+      "model and args are mutually exclusive — model compiles to `-m <model>` after `--`; pass args instead when you need full control of the agent argv",
+  });
 
 export const worktreeCreateOpts = z
   .object({

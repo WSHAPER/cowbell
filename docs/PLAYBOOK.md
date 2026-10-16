@@ -31,7 +31,14 @@ No params means the local herdr session (always the default). Pass `machine: "<l
 2. Call `agent_messages` on that pane — expect `channel: "structured"` and normalized turns.
 3. Call it on a pane-level agent (no `agent_session`) — expect `channel: "pane_fallback"` with a `reason`.
 
-When opencode's API drifts, `npm run reference:opencode` re-captures the operation fixture and the drift suite names the token.
+When opencode's API drifts, `npm run reference:opencode` re-captures the operation fixture and the drift suite names the token. Same for the model surface: `npm run reference:opencode-models`.
+
+## Model selection (agent_start model + models_list)
+
+`agent_start`'s `model` param compiles to `-- -m <model>` (exclusive with `args`, never validated against a live list — spawn stays offline-safe). To eyeball discovery live:
+
+1. Call `models_list` — expect `default` at the top level and flagged on exactly one entry.
+2. Pick a selector from the result and start an agent with it — `herdr agent start` argv shows `-- -m <selector>` in the e2e log.
 
 ## Devcontainer
 

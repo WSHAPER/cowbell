@@ -6,10 +6,13 @@ import { parseOrThrow as v } from "../parse.js";
  *
  * SINGLE SOURCE for every opencode api call we shell out to, mirroring
  * the herdr spec-* modules. The opencode background service exposes
- * its routes via `opencode api GET /openapi.json`; the drift fixture
- * (tests/fixtures/opencode-session-message.json) captures the
- * session.message.list operation so renames fail the suite, not the
- * fleet. The CLI itself handles background-service discovery + auth.
+ * its routes via `opencode api GET /openapi.json`; the drift fixtures
+ * (tests/fixtures/opencode-session-message.json from
+ * scripts/dump-opencode-surface.sh, tests/fixtures/opencode-models.json
+ * from scripts/dump-opencode-models.sh) pin the session.message.list
+ * and model.list/model.default operations so renames fail the suite,
+ * not the fleet. The CLI itself handles background-service
+ * discovery + auth.
  */
 
 /**
@@ -62,4 +65,28 @@ export function messageList(
   if (opts.limit !== undefined) argv.push("--param", `limit=${opts.limit}`);
   if (opts.order !== undefined) argv.push("--param", `order=${opts.order}`);
   return { argv, surface: "opencode session.message.list" };
+}
+
+/**
+ * List every model the local opencode service knows about
+ * (operation `model.list`, GET /api/model). No parameters — the
+ * service resolves its own location; machine/remote do not apply.
+ */
+export function modelList(): ApiSpec {
+  return {
+    argv: ["opencode", "api", "model.list"],
+    surface: "opencode model.list",
+  };
+}
+
+/**
+ * The model used when a session has no explicit selection
+ * (operation `model.default`, GET /api/model/default). The response
+ * `data` is nullable — a service with no default configured.
+ */
+export function modelDefault(): ApiSpec {
+  return {
+    argv: ["opencode", "api", "model.default"],
+    surface: "opencode model.default",
+  };
 }

@@ -94,6 +94,33 @@ describe("agent flow validation (wait + prompt)", () => {
   });
 });
 
+describe("agent start model validation (typed selection)", () => {
+  const rejects = (fn: () => unknown, needle: string | RegExp) => {
+    expect(fn).toThrow(needle);
+  };
+
+  it("model is non-empty and exclusive with args", () => {
+    rejects(
+      () => sa.agentStart("n", "opencode", "w1:p1", { model: "" }),
+      "agentStart",
+    );
+    rejects(
+      () =>
+        sa.agentStart("n", "opencode", "w1:p1", {
+          model: "zai/glm-5.3",
+          args: ["-m", "zai/glm-5.3"],
+        }),
+      /model.*args|args.*model/i,
+    );
+    expect(() =>
+      sa.agentStart("n", "opencode", "w1:p1", { model: "zai/glm-5.3" }),
+    ).not.toThrow();
+    expect(() =>
+      sa.agentStart("n", "opencode", "w1:p1", { args: ["-m", "x"] }),
+    ).not.toThrow();
+  });
+});
+
 describe("agent surface validation (start + transport + error shape)", () => {
   const rejects = (fn: () => unknown, needle: string | RegExp) => {
     expect(fn).toThrow(needle);

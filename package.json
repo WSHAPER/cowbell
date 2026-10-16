@@ -25,6 +25,7 @@
     "reference:update": "bash scripts/setup-references.sh --update",
     "reference:surface": "bash scripts/dump-upstream-surface.sh",
     "reference:opencode": "bash scripts/dump-opencode-surface.sh",
+    "reference:opencode-models": "bash scripts/dump-opencode-models.sh",
     "e2e": "bash scripts/e2e.sh",
     "bench": "bash scripts/e2e.sh --bench"
   },

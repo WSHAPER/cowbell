@@ -71,6 +71,39 @@ export const messagesEnvelopeSchema = z
 
 export type RawMessage = z.output<typeof rawMessage>;
 
+// -- raw API response (model discovery) ---------------------------------------
+//
+// GET /api/model (model.list) → {data: Model.Info[]}
+// GET /api/model/default (model.default) → {data: Model.Info | null}
+//
+// Same two-layer discipline as the transcript: `.passthrough()` so a
+// new upstream field cannot break discovery, while the keys the
+// normalized view needs (id, modelID, providerID, name, variants[].id
+// — all required by Model.Info today, pinned by the models drift
+// fixture) must be present.
+
+const rawVariant = z.object({ id: z.string().min(1) }).passthrough();
+
+const rawModelInfo = z
+  .object({
+    id: z.string().min(1),
+    modelID: z.string().min(1),
+    providerID: z.string().min(1),
+    name: z.string(),
+    variants: z.array(rawVariant),
+  })
+  .passthrough();
+
+export const modelsEnvelopeSchema = z
+  .object({ data: z.array(rawModelInfo) })
+  .passthrough();
+
+export const modelDefaultEnvelopeSchema = z
+  .object({ data: rawModelInfo.nullable() })
+  .passthrough();
+
+export type RawModelInfo = z.output<typeof rawModelInfo>;
+
 // -- normalized transcript view ----------------------------------------------
 
 const messagePartSchema = z.union([
@@ -105,3 +138,37 @@ export const transcriptPageSchema = z
   })
   .strict();
 export type TranscriptPage = z.output<typeof transcriptPageSchema>;
+
+// -- normalized models view ----------------------------------------------------
+
+/**
+ * The trimmed model view models_list exposes: the full selector
+ * string agent_start's `model` param wants (and `opencode -m`
+ * accepts), the provider, display name, variant ids, and whether
+ * this entry is the service default. Not exposed: cost, limits,
+ * capabilities, provider settings — discovery, not cataloging.
+ */
+const modelEntrySchema = z
+  .object({
+    /** Selector for agent_start model / `-m`: "providerID/modelID". */
+    model: z.string().min(1),
+    provider: z.string().min(1),
+    name: z.string(),
+    /** Variant ids; append as "#variant" to the selector when used. */
+    variants: z.array(z.string().min(1)),
+    /** True on exactly the entry matching the service default. */
+    default: z.boolean(),
+  })
+  .strict();
+
+export const modelsResultSchema = z
+  .object({
+    models: z.array(modelEntrySchema),
+    /**
+     * The default selector — also flagged inside `models`. Null when
+     * the service has no default configured.
+     */
+    default: z.string().min(1).nullable(),
+  })
+  .strict();
+export type ModelsResult = z.output<typeof modelsResultSchema>;

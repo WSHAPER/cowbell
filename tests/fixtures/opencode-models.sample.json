@@ -1,0 +1,52 @@
+{
+  "list": {
+    "location": { "directory": "/tmp/opencode/fixture" },
+    "data": [
+      {
+        "id": "fixture-model",
+        "modelID": "fixture-model-v2",
+        "providerID": "fixture",
+        "name": "Fixture Model",
+        "variants": [
+          { "id": "low", "settings": { "reasoningEffort": "low" } },
+          { "id": "high" }
+        ],
+        "status": "active",
+        "enabled": true
+      },
+      {
+        "id": "fixture-model-pro",
+        "modelID": "fixture-model-pro",
+        "providerID": "fixture",
+        "name": "Fixture Model Pro",
+        "variants": [],
+        "status": "active",
+        "enabled": true
+      },
+      {
+        "id": "glm-5.3",
+        "modelID": "glm-5.3",
+        "providerID": "zai",
+        "family": "glm",
+        "name": "GLM-5.3",
+        "variants": [{ "id": "low" }, { "id": "high" }, { "id": "max" }],
+        "cost": [{ "input": 1.4, "output": 4.4 }],
+        "status": "active",
+        "enabled": true,
+        "limit": { "context": 1000000, "output": 131072 }
+      }
+    ]
+  },
+  "default": {
+    "location": { "directory": "/tmp/opencode/fixture" },
+    "data": {
+      "id": "glm-5.3",
+      "modelID": "glm-5.3",
+      "providerID": "zai",
+      "name": "GLM-5.3",
+      "variants": [{ "id": "low" }, { "id": "high" }, { "id": "max" }],
+      "status": "active",
+      "enabled": true
+    }
+  }
+}

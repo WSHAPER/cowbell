@@ -6,6 +6,7 @@ import * as agents from "../herdr/spec-agent.js";
 import * as panes from "../herdr/spec-pane.js";
 import * as workspaces from "../herdr/spec-workspace.js";
 import * as worktrees from "../herdr/spec-worktree.js";
+import { fetchModels } from "../opencode/client.js";
 import type { TransportParams } from "./transport.js";
 import {
   withT,
@@ -283,6 +284,25 @@ function registerAgentTranscriptTools(server: McpServer): void {
   );
 }
 
+/**
+ * Model discovery for agent_start's `model` param — the read-only
+ * other half of typed model selection. NO transport params on
+ * purpose: this queries the LOCAL opencode background service, so
+ * machine/remote do not apply.
+ */
+function registerModelTools(server: McpServer): void {
+  server.tool(
+    "models_list",
+    "List models available to the LOCAL opencode service (GET /api/model + /api/model/default " +
+      "via the opencode api CLI, read-only) — the discovery side of agent_start's `model` param. " +
+      "Each entry carries the full `providerID/modelID` selector plus variant ids; the default " +
+      "is returned at the top level and flagged on its entry. machine/remote do NOT apply: the " +
+      "opencode API is local-only, so this tool takes no parameters.",
+    {},
+    async () => json(await fetchModels()),
+  );
+}
+
 function registerAgentPromptTools(server: McpServer): void {
   server.tool(
     "agent_prompt",
@@ -340,6 +360,15 @@ function registerAgentControlTools(server: McpServer): void {
       kind: z.enum(agents.AGENT_KINDS),
       pane: paneId,
       timeout_ms: z.number().int().positive().optional(),
+      model: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          "Model selector, e.g. 'zai/glm-5.3' (optional '#variant') — compiled to `-m <model>` " +
+            "after `--`. Mutually exclusive with args. NOT validated against a live model list " +
+            "(spawn stays offline-safe); call models_list first to discover selectors",
+        ),
       args: z.array(z.string().min(1)).min(1).optional(),
     }),
     async (v: StartParams) =>
@@ -347,6 +376,7 @@ function registerAgentControlTools(server: McpServer): void {
         await exec(
           agents.agentStart(v.name, v.kind, v.pane, {
             timeoutMs: v.timeout_ms,
+            model: v.model,
             args: v.args,
           }),
           transport(v),
@@ -378,6 +408,7 @@ function buildServer(): McpServer {
   registerPaneTools(server);
   registerAgentQueryTools(server);
   registerAgentTranscriptTools(server);
+  registerModelTools(server);
   registerAgentPromptTools(server);
   registerAgentControlTools(server);
   return server;

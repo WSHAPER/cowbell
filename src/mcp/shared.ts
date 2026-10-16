@@ -90,6 +90,8 @@ export type StartParams = TransportParams & {
   kind: AgentKind;
   pane: string;
   timeout_ms?: number;
+  /** Compiles to `-- -m <model>`; exclusive with args. */
+  model?: string;
   args?: string[];
 };
 export type RenameParams = TransportParams & { target: string; name: string };

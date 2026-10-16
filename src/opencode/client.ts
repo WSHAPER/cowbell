@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import type { z } from "zod";
 import * as oc from "./schemas.js";
 import * as spec from "./spec.js";
 
@@ -47,6 +48,32 @@ export interface ListOpts {
   order?: spec.MessageOrder;
 }
 
+/** stdout → JSON, with the surface named when it isn't JSON. */
+function parseJson(s: spec.ApiSpec, stdout: string): unknown {
+  try {
+    return JSON.parse(stdout);
+  } catch {
+    throw new OpenCodeApiError(
+      s.surface,
+      `response is not JSON (got ${JSON.stringify(stdout.slice(0, 120))})`,
+    );
+  }
+}
+
+/** JSON → validated shape, with the drifted path named on failure. */
+function validate<T>(s: spec.ApiSpec, schema: z.ZodType<T>, json: unknown): T {
+  const parsed = schema.safeParse(json);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0]!;
+    const at = issue.path.length ? `.${String(issue.path.join("."))}` : "";
+    throw new OpenCodeApiError(
+      s.surface,
+      `response drifted from the documented shape${at}: ${issue.message}`,
+    );
+  }
+  return parsed.data;
+}
+
 /**
  * Fetch + validate one page of a session's messages, oldest-first
  * when order is omitted by the caller's choice. Unknown part types
@@ -58,27 +85,58 @@ export async function fetchMessages(
   exec: ExecFn = execOpenCode,
 ): Promise<oc.TranscriptPage> {
   const s: spec.ApiSpec = spec.messageList(session, opts);
-  const stdout = await exec(s.argv);
-  let json: unknown;
-  try {
-    json = JSON.parse(stdout);
-  } catch {
-    throw new OpenCodeApiError(
-      s.surface,
-      `response is not JSON (got ${JSON.stringify(stdout.slice(0, 120))})`,
-    );
-  }
-  const parsed = oc.messagesEnvelopeSchema.safeParse(json);
-  if (!parsed.success) {
-    const issue = parsed.error.issues[0]!;
-    const at = issue.path.length ? `.${String(issue.path.join("."))}` : "";
-    throw new OpenCodeApiError(
-      s.surface,
-      `response drifted from the documented shape${at}: ${issue.message}`,
-    );
-  }
+  const parsed = validate(
+    s,
+    oc.messagesEnvelopeSchema,
+    parseJson(s, await exec(s.argv)),
+  );
   return oc.transcriptPageSchema.parse({
-    messages: parsed.data.data.map(normalize),
+    messages: parsed.data.map(normalize),
+  });
+}
+
+/** The full selector form agent_start `model` / `opencode -m` wants. */
+function modelSelector(m: oc.RawModelInfo): string {
+  return `${m.providerID}/${m.modelID}`;
+}
+
+/**
+ * Model discovery, read-only: GET /api/model + /api/model/default,
+ * one CLI call each via the pinned spec argvs. The default is
+ * returned at the top level AND flagged on its entry; a null default
+ * (nothing configured) stays null.
+ */
+export async function fetchModels(
+  exec: ExecFn = execOpenCode,
+): Promise<oc.ModelsResult> {
+  const list = spec.modelList();
+  const def = spec.modelDefault();
+  const [listOut, defOut] = await Promise.all([
+    exec(list.argv),
+    exec(def.argv),
+  ]);
+  const listEnvelope = validate(
+    list,
+    oc.modelsEnvelopeSchema,
+    parseJson(list, listOut),
+  );
+  const defEnvelope = validate(
+    def,
+    oc.modelDefaultEnvelopeSchema,
+    parseJson(def, defOut),
+  );
+  const defaultModel = defEnvelope.data
+    ? modelSelector(defEnvelope.data)
+    : null;
+  return oc.modelsResultSchema.parse({
+    models: listEnvelope.data.map((m) => ({
+      model: modelSelector(m),
+      provider: m.providerID,
+      name: m.name,
+      variants: m.variants.map((x) => x.id),
+      default: defaultModel !== null && modelSelector(m) === defaultModel,
+    })),
+    default: defaultModel,
   });
 }
 

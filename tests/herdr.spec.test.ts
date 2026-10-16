@@ -160,6 +160,54 @@ describe("agent argv pins (start)", () => {
   });
 });
 
+describe("agent argv pins (start: model selection)", () => {
+  it("model compiles to `-- -m <model>` (with variant riding along)", () => {
+    expect(
+      sa.agentStart("mesh", "opencode", "w36:p1", {
+        model: "zai/glm-5.3",
+      }).argv,
+    ).toEqual([
+      "herdr",
+      "agent",
+      "start",
+      "mesh",
+      "--kind",
+      "opencode",
+      "--pane",
+      "w36:p1",
+      "--",
+      "-m",
+      "zai/glm-5.3",
+    ]);
+    expect(
+      sa.agentStart("mesh", "opencode", "w36:p1", {
+        timeoutMs: 180_000,
+        model: "zai/glm-5.3#high",
+      }).argv,
+    ).toEqual([
+      "herdr",
+      "agent",
+      "start",
+      "mesh",
+      "--kind",
+      "opencode",
+      "--pane",
+      "w36:p1",
+      "--timeout",
+      "180000",
+      "--",
+      "-m",
+      "zai/glm-5.3#high",
+    ]);
+  });
+
+  it("no model = no -m and no `--` passthrough", () => {
+    const argv = sa.agentStart("mesh", "opencode", "w36:p1").argv;
+    expect(argv).not.toContain("-m");
+    expect(argv).not.toContain("--");
+  });
+});
+
 describe("agent prompt flow (queue-of-one): deliver_when now", () => {
   it("default is a single prompt spec", () => {
     expect(sa.agentPromptFlow("w36:p1", "do it")).toEqual([
