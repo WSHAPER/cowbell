@@ -1,0 +1,43 @@
+{
+  "list": {
+    "operationId": "model.list",
+    "method": "get",
+    "path": "/api/model",
+    "parameters": [
+      {
+        "name": "location",
+        "in": "query",
+        "required": false
+      }
+    ]
+  },
+  "default": {
+    "operationId": "model.default",
+    "method": "get",
+    "path": "/api/model/default",
+    "parameters": [
+      {
+        "name": "location",
+        "in": "query",
+        "required": false
+      }
+    ],
+    "dataNullable": true
+  },
+  "modelInfoRequired": [
+    "id",
+    "modelID",
+    "providerID",
+    "name",
+    "capabilities",
+    "variants",
+    "time",
+    "cost",
+    "status",
+    "enabled",
+    "limit"
+  ],
+  "variantRequired": [
+    "id"
+  ]
+}

@@ -1,0 +1,49 @@
+{
+  "operationId": "session.message.list",
+  "method": "get",
+  "path": "/api/session/{sessionID}/message",
+  "parameters": [
+    {
+      "name": "sessionID",
+      "in": "path",
+      "required": true
+    },
+    {
+      "name": "limit",
+      "in": "query",
+      "required": false
+    },
+    {
+      "name": "order",
+      "in": "query",
+      "required": false
+    },
+    {
+      "name": "cursor",
+      "in": "query",
+      "required": false
+    },
+    {
+      "name": "type",
+      "in": "query",
+      "required": false
+    }
+  ],
+  "partTypes": [
+    "Text",
+    "Reasoning",
+    "Tool"
+  ],
+  "messageTypes": [
+    "agent-switched",
+    "model-switched",
+    "location-switched",
+    "user",
+    "synthetic",
+    "system",
+    "skill",
+    "shell",
+    "assistant",
+    "idle"
+  ]
+}

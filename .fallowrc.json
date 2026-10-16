@@ -1,0 +1,10 @@
+{
+  "$schema": "./node_modules/fallow/schema.json",
+  "entry": [
+    "src/index.ts",
+    "src/bin/stdio.ts",
+    "scripts/lib/e2e-driver.mjs",
+    "scripts/lib/wait-own-pane.mjs"
+  ],
+  "ignorePatterns": ["dist", "coverage", ".reference", "scripts/lib"]
+}

@@ -1,0 +1,34 @@
+{
+  "protocol": 22,
+  "subscribe_method": "events.subscribe",
+  "subscribe_params_required": [
+    "subscriptions"
+  ],
+  "agent_status_subscription": {
+    "type": "pane.agent_status_changed",
+    "required": [
+      "type",
+      "pane_id"
+    ],
+    "optional": [
+      "agent_status"
+    ]
+  },
+  "event_kinds": [
+    "pane.output_matched",
+    "pane.agent_status_changed",
+    "pane.scroll_changed"
+  ],
+  "agent_status_event_required": [
+    "pane_id",
+    "workspace_id",
+    "agent_status"
+  ],
+  "agent_statuses": [
+    "idle",
+    "working",
+    "blocked",
+    "done",
+    "unknown"
+  ]
+}

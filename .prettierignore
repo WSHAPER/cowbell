@@ -1,0 +1,6 @@
+# Fixture byte-stability: tests/fixtures/* is captured verbatim by
+# scripts/dump-*.sh (the reference:regen contract is "script output ==
+# committed bytes, diff empty"). Prettier reflowing short arrays breaks
+# that contract, so fixtures are exempt from formatting.
+tests/fixtures/
+fallow-baselines/

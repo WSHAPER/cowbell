@@ -1,0 +1,71 @@
+{
+  "name": "cowbell",
+  "version": "0.1.0",
+  "description": "MCP server for herdr fleets: typed tools for terminal workspace, pane, and AI agent control",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.json",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "fallow": "fallow",
+    "fallow:audit": "fallow audit",
+    "fallow:health": "fallow health --score",
+    "mcp:stdio": "tsx src/bin/stdio.ts",
+    "reference:setup": "bash scripts/setup-references.sh",
+    "reference:update": "bash scripts/setup-references.sh --update",
+    "reference:surface": "bash scripts/dump-upstream-surface.sh",
+    "reference:opencode": "bash scripts/dump-opencode-surface.sh",
+    "reference:opencode-models": "bash scripts/dump-opencode-models.sh",
+    "reference:herdr-events": "bash scripts/dump-herdr-events-surface.sh",
+    "e2e": "bash scripts/e2e.sh",
+    "e2e:wait-own-pane": "node scripts/lib/wait-own-pane.mjs",
+    "bench": "bash scripts/e2e.sh --bench"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "@types/node": "^22.0.0",
+    "eslint": "^9.0.0",
+    "fallow": "^3.25.0",
+    "prettier": "^3.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.6.0",
+    "typescript-eslint": "^8.0.0",
+    "vitest": "^2.0.0"
+  },
+  "keywords": [
+    "mcp",
+    "herdr",
+    "terminal",
+    "agent",
+    "fleet",
+    "workspace",
+    "tmux",
+    "ai",
+    "llm",
+    "model-context-protocol"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/WSHAPER/cowbell.git"
+  },
+  "author": "WSHAPER",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/WSHAPER/cowbell/issues"
+  },
+  "homepage": "https://github.com/WSHAPER/cowbell#readme"
+}

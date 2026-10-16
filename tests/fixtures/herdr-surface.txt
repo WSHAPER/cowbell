@@ -1,0 +1,495 @@
+herdr 0.9.5
+# Captured 2026-10-16T21:27:13Z via scripts/dump-upstream-surface.sh
+# Regenerate: npm run reference:surface   (reference build: COWBELL_REF_BIN=...)
+
+## workspace list
+List workspaces
+
+Usage: herdr workspace list
+
+
+## workspace get
+Show a workspace
+
+Usage: herdr workspace get <workspace_id>
+
+Arguments:
+  <workspace_id>
+
+
+## workspace create
+Create a workspace
+
+Usage: herdr workspace create [OPTIONS]
+
+Options:
+      --cwd <PATH>
+          
+
+      --label <TEXT>
+          
+
+      --env <KEY=VALUE>
+          Set an environment variable for the launched process
+
+      --focus
+          
+
+      --no-focus
+
+
+## workspace close
+Close a workspace
+
+Usage: herdr workspace close <workspace_id>
+
+Arguments:
+  <workspace_id>
+
+
+## workspace focus
+Focus a workspace
+
+Usage: herdr workspace focus <workspace_id>
+
+Arguments:
+  <workspace_id>
+
+
+## pane get
+Show a pane
+
+Usage: herdr pane get <pane_id>
+
+Arguments:
+  <pane_id>
+
+
+## pane read
+Read pane terminal output
+
+Usage: herdr pane read [OPTIONS] <PANE_ID>
+
+Arguments:
+  <PANE_ID>
+          
+
+Options:
+      --source <SOURCE>
+          Terminal snapshot source (default: recent)
+          
+          [possible values: visible, recent, recent-unwrapped, detection]
+
+      --lines <N>
+          
+
+      --format <FORMAT>
+          [possible values: text, ansi]
+
+      --ansi
+          
+
+      --raw
+
+
+## pane send-text
+Send literal text to a pane
+
+Usage: herdr pane send-text <PANE_ID> <TEXT>
+
+Arguments:
+  <PANE_ID>
+          
+
+  <TEXT>
+          
+
+next: herdr pane run <PANE_ID> <COMMAND> sends text and Enter in one call
+
+
+## pane send-keys
+Send key presses to a pane
+
+Usage: herdr pane send-keys <PANE_ID> <KEY>...
+
+Arguments:
+  <PANE_ID>
+          
+
+  <KEY>...
+          
+
+Use esc as the canonical Escape key name; escape is also accepted.
+
+
+## pane run
+Run a command in a pane
+
+Usage: herdr pane run <PANE_ID> <COMMAND>...
+
+Arguments:
+  <PANE_ID>
+          
+
+  <COMMAND>...
+
+
+## agent list
+List agents
+
+Usage: herdr agent list
+
+
+## agent get
+Show an agent
+
+Usage: herdr agent get <target>
+
+Arguments:
+  <target>
+
+
+## agent read
+Read agent terminal output
+
+Usage: herdr agent read <TARGET> [OPTIONS]
+
+Arguments:
+  <TARGET>
+          
+
+Options:
+      --source <SOURCE>
+          Terminal snapshot source (default: recent)
+          
+          [possible values: visible, recent, recent-unwrapped, detection]
+
+      --lines <N>
+          
+
+      --format <FORMAT>
+          [possible values: text, ansi]
+
+      --ansi
+
+
+## agent prompt
+Submit a prompt to an agent
+
+Usage: herdr agent prompt <TARGET> <TEXT> [OPTIONS]
+
+Arguments:
+  <TARGET>
+          
+
+  <TEXT>
+          
+
+Options:
+      --wait
+          Wait for the first matching state observed after submission
+
+      --until <STATUS>
+          State to match after --wait; repeat for more than one state
+          
+          [possible values: idle, working, blocked, done, unknown]
+
+      --timeout <MS>
+          Fail after this many milliseconds
+
+If the agent is already blocked, submission is rejected with agent_blocked before any input is sent. When an accepted submission starts from another non-working state, --wait requires an observed working or blocked state within 5000ms; otherwise it returns agent_prompt_stalled. A caller timeout that expires first returns timeout. It then matches idle, done, or blocked by default, or any exact --until state. It does not track turns: if the agent is already working, that active turn's completion may match.
+
+
+## agent wait
+Wait until an agent reaches one of the requested states
+
+Usage: herdr agent wait <TARGET> [OPTIONS]
+
+Arguments:
+  <TARGET>
+          
+
+Options:
+      --until <STATUS>
+          State to match; repeat for more than one state
+          
+          [possible values: idle, working, blocked, done, unknown]
+
+      --timeout <MS>
+          Fail after this many milliseconds
+
+Without --until, matches idle, done, or blocked. Use --until unknown explicitly when needed. Without --timeout, waits indefinitely.
+
+
+## agent start
+Start a supported interactive agent in an existing pane
+
+Usage: herdr agent start <NAME> --kind <KIND> --pane <ID> [OPTIONS] [-- [AGENT_ARG]...]
+
+Arguments:
+  <NAME>
+          
+
+  [AGENT_ARG]...
+          
+
+Options:
+      --kind <KIND>
+          Supported agent kind and canonical executable
+          
+          [possible values: pi, claude, codex, gemini, cursor, devin, agy, cline, omp, mastracode, opencode, copilot, kimi, kiro, droid, amp, grok, hermes, kilo, qodercli, qwen, letta, maki, muse]
+
+      --pane <ID>
+          Existing pane at an interactive shell prompt
+
+      --timeout <MS>
+          Wait for interactive readiness (default: 30000; max: 300000)
+
+The pane must be at its interactive shell prompt. Success means the expected agent was detected in the same terminal and is ready for input.
+
+next: herdr agent prompt <TARGET> <TEXT> --wait
+
+
+## agent focus
+Focus an agent
+
+Usage: herdr agent focus <target>
+
+Arguments:
+  <target>
+
+
+## agent rename
+Rename an agent
+
+Usage: herdr agent rename <TARGET> <NAME>|--clear
+
+Arguments:
+  <TARGET>
+          
+
+  [NAME]
+          
+
+Options:
+      --clear
+
+
+## worktree create
+Create and open a Git worktree
+
+Usage: herdr worktree create [OPTIONS]
+
+Options:
+      --workspace <ID>
+          
+
+      --cwd <PATH>
+          
+
+      --branch <NAME>
+          
+
+      --base <REF>
+          
+
+      --path <PATH>
+          
+
+      --label <TEXT>
+          
+
+      --focus
+          
+
+      --no-focus
+          
+
+      --trust-repository
+
+
+## worktree remove
+Remove a worktree checkout
+
+Usage: herdr worktree remove [OPTIONS]
+
+Options:
+      --workspace <ID>
+          
+
+      --force
+          
+
+      --trust-repository
+
+
+## tab list
+List tabs
+
+Usage: herdr tab list [OPTIONS]
+
+Options:
+      --workspace <WORKSPACE_ID>
+
+
+## tab create
+Create a tab
+
+Usage: herdr tab create [OPTIONS]
+
+Options:
+      --workspace <WORKSPACE_ID>
+          
+
+      --cwd <PATH>
+          
+
+      --label <TEXT>
+          
+
+      --env <KEY=VALUE>
+          Set an environment variable for the launched process
+
+      --focus
+          
+
+      --no-focus
+
+
+## tab get
+Show a tab
+
+Usage: herdr tab get <tab_id>
+
+Arguments:
+  <tab_id>
+
+
+## tab focus
+Focus a tab
+
+Usage: herdr tab focus <tab_id>
+
+Arguments:
+  <tab_id>
+
+
+## tab rename
+Rename a tab
+
+Usage: herdr tab rename <TAB_ID> <LABEL>...
+
+Arguments:
+  <TAB_ID>
+          
+
+  <LABEL>...
+
+
+## tab close
+Close a tab
+
+Usage: herdr tab close <tab_id>
+
+Arguments:
+  <tab_id>
+
+
+## session list
+List sessions
+
+Usage: herdr session list [OPTIONS]
+
+Options:
+      --json
+
+
+## session stop
+Stop a session
+
+Usage: herdr session stop [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>
+          
+
+Options:
+      --json
+
+
+## session delete
+Delete a stopped session
+
+Usage: herdr session delete [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>
+          
+
+Options:
+      --json
+
+
+## machine list
+List saved SSH machines
+
+Usage: herdr machine list [OPTIONS]
+
+Options:
+      --json
+
+
+## machine status
+Check saved machines without prompting for authentication
+
+Usage: herdr machine status [OPTIONS] [LABEL_OR_ID]
+
+Arguments:
+  [LABEL_OR_ID]
+          
+
+Options:
+      --json
+
+
+## machine rename
+Rename a saved SSH machine
+
+Usage: herdr machine rename --label <LABEL> <PROFILE_ID>
+
+Arguments:
+  <PROFILE_ID>
+          
+
+Options:
+      --label <LABEL>
+          Set the machine label shown in the sidebar
+
+
+## machine remove
+Remove a saved SSH machine
+
+Usage: herdr machine remove <PROFILE_ID>
+
+Arguments:
+  <PROFILE_ID>
+
+
+## machine enable
+Enable a saved SSH machine
+
+Usage: herdr machine enable <PROFILE_ID>
+
+Arguments:
+  <PROFILE_ID>
+
+
+## machine disable
+Disable a saved SSH machine
+
+Usage: herdr machine disable <PROFILE_ID>
+
+Arguments:
+  <PROFILE_ID>
+
+

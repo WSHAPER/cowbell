@@ -1,0 +1,65 @@
+{
+  "data": [
+    {
+      "id": "msg_fixture_user001",
+      "metadata": {},
+      "time": { "created": 1792154000000 },
+      "text": "Fix the flaky test in CI",
+      "files": [],
+      "agents": [],
+      "type": "user"
+    },
+    {
+      "id": "msg_fixture_evt001",
+      "metadata": { "notice": "restart" },
+      "time": { "created": 1792154000500 },
+      "text": "The server restarted while you were working.",
+      "description": "Continuing after restart",
+      "type": "synthetic"
+    },
+    {
+      "id": "msg_fixture_evt002",
+      "time": { "created": 1792154000600 },
+      "type": "idle",
+      "outcome": "failed"
+    },
+    {
+      "id": "msg_fixture_asst001",
+      "time": { "created": 1792154001000, "streamed": 1792154005000 },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "fixture-model",
+        "providerID": "fixture",
+        "variant": "default"
+      },
+      "content": [
+        {
+          "type": "reasoning",
+          "text": "Look at the retry block first.",
+          "state": {},
+          "time": { "created": 1792154002000 }
+        },
+        { "type": "text", "text": "The retry block races the clock." },
+        {
+          "type": "tool",
+          "id": "call_fixture_1",
+          "name": "shell",
+          "executed": true,
+          "state": {
+            "status": "completed",
+            "input": { "command": "vitest run" },
+            "metadata": {}
+          },
+          "time": { "created": 1792154003000, "ran": 1792154004000 }
+        },
+        { "type": "step-start" }
+      ],
+      "snapshot": { "start": "deadbeef" }
+    }
+  ],
+  "cursor": {
+    "previous": "cgp2X2ZpeHR1cmVfcHJldg",
+    "next": "cgp2X2ZpeHR1cmVfbmV4dA"
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "id": "cli:agent:list",
+  "result": {
+    "agents": [
+      {
+        "agent": "opencode",
+        "agent_session": {
+          "agent": "opencode",
+          "kind": "id",
+          "source": "herdr:opencode",
+          "value": "ses_fixture0001AAAAAAAAAAAAAAAA"
+        },
+        "agent_status": "idle",
+        "cwd": "/repos/demo",
+        "pane_id": "w20:p1",
+        "workspace_id": "w20"
+      },
+      {
+        "agent": "opencode",
+        "agent_status": "working",
+        "interactive_ready": true,
+        "name": "agent-comm",
+        "pane_id": "w3H:p1",
+        "workspace_id": "w3H"
+      }
+    ],
+    "type": "agent_list"
+  }
+}
