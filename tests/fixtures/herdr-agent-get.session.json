@@ -1,0 +1,26 @@
+{
+  "id": "cli:agent:get",
+  "result": {
+    "agent": {
+      "agent": "opencode",
+      "agent_session": {
+        "agent": "opencode",
+        "kind": "id",
+        "source": "herdr:opencode",
+        "value": "ses_fixture0001AAAAAAAAAAAAAAAA"
+      },
+      "agent_status": "idle",
+      "completion_seq": 46,
+      "cwd": "/repos/demo",
+      "focused": false,
+      "pane_id": "w20:p1",
+      "revision": 2,
+      "state_change_seq": 46,
+      "tab_id": "w20:t1",
+      "terminal_id": "term_fixture",
+      "terminal_title": "OC | demo",
+      "workspace_id": "w20"
+    },
+    "type": "agent_info"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "id": "cli:agent:get",
+  "result": {
+    "agent": {
+      "agent": "opencode",
+      "agent_status": "working",
+      "cwd": "/repos/demo",
+      "focused": true,
+      "interactive_ready": true,
+      "name": "agent-comm",
+      "pane_id": "w3H:p1",
+      "revision": 2,
+      "state_change_seq": 45,
+      "tab_id": "w3H:t1",
+      "terminal_id": "term_fixture",
+      "terminal_title": "OC | demo",
+      "workspace_id": "w3H"
+    },
+    "type": "agent_info"
+  }
+}
