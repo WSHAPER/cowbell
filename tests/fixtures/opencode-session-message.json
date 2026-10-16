@@ -29,7 +29,11 @@
       "required": false
     }
   ],
-  "partTypes": ["Text", "Reasoning", "Tool"],
+  "partTypes": [
+    "Text",
+    "Reasoning",
+    "Tool"
+  ],
   "messageTypes": [
     "agent-switched",
     "model-switched",

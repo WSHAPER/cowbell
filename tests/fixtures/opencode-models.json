@@ -37,5 +37,7 @@
     "enabled",
     "limit"
   ],
-  "variantRequired": ["id"]
+  "variantRequired": [
+    "id"
+  ]
 }
