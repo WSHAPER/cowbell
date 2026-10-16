@@ -33,6 +33,7 @@ import type {
   RenameParams,
   MessagesParams,
 } from "./shared.js";
+import { agentStartShape } from "./shared.js";
 
 /**
  * The cowbell tool surface — a 1:1 mapping onto the canonical herdr
@@ -355,22 +356,7 @@ function registerAgentControlTools(server: McpServer): void {
   server.tool(
     "agent_start",
     "Start an agent in an existing pane (create a workspace first, use its root pane)",
-    withT({
-      name: z.string(),
-      kind: z.enum(agents.AGENT_KINDS),
-      pane: paneId,
-      timeout_ms: z.number().int().positive().optional(),
-      model: z
-        .string()
-        .min(1)
-        .optional()
-        .describe(
-          "Model selector, e.g. 'zai/glm-5.3' (optional '#variant') — compiled to `-m <model>` " +
-            "after `--`. Mutually exclusive with args. NOT validated against a live model list " +
-            "(spawn stays offline-safe); call models_list first to discover selectors",
-        ),
-      args: z.array(z.string().min(1)).min(1).optional(),
-    }),
+    agentStartShape,
     async (v: StartParams) =>
       text(
         await exec(

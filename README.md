@@ -103,7 +103,7 @@ Two ways to read an agent, two different questions:
 
 ## Model selection: typed at start, discovered read-only
 
-`agent_start` accepts `model` — a non-empty selector like `zai/glm-5.3` (optional `#variant` suffix) — compiled internally to `-- -m <model>` after `--` in the herdr argv. herdr's argv stays authoritative; cowbell never invents flags. `model` and `args` are mutually exclusive (a validation error, no silent precedence): use `model` for the common case, `args` when you need full control of the agent binary's argv. The value is NOT checked against a live model list at start time — spawn stays offline-safe.
+`agent_start` accepts `model` — a non-empty selector like `zai/glm-5.3` (optional `#variant` suffix) — compiled per kind after `--` in the herdr argv: opencode spawns run `mini -m <model>` (opencode's full TUI takes no model flag at all — verified live on v2.0.27 — `mini` is its interactive surface that does), every other kind gets the common `-m <model>`. herdr's argv stays authoritative; cowbell never invents flags. `model` and `args` are mutually exclusive (a validation error, no silent precedence): use `model` for the common case, `args` when you need full control of the agent binary's argv. The value is NOT checked against a live model list at start time — spawn stays offline-safe, and an unknown selector still spawns (the failure surfaces only when the model is first used), so discover selectors first. One trade-off: opencode model spawns run the minimal interface, and herdr links a native agent_session only for the full TUI — `agent_messages` on such agents degrades to its documented pane_fallback channel.
 
 Discovery is the separate, read-only tool: `models_list` queries the local opencode background service (`GET /api/model` + `GET /api/model/default` via the `opencode api` CLI, which handles discovery + auth) and returns
 
@@ -122,7 +122,7 @@ Discovery is the separate, read-only tool: `models_list` queries the local openc
 }
 ```
 
-The `model` field is exactly the string `agent_start` wants (and `opencode -m` accepts); the default is returned at the top level and flagged on its entry (null when nothing is configured). No routing, no pool economy — just typed selection plus honest discovery.
+The `model` field is exactly the string `agent_start` wants (and `opencode mini -m` / `opencode run -m` accept); the default is returned at the top level and flagged on its entry (null when nothing is configured). No routing, no pool economy — just typed selection plus honest discovery.
 
 ## Drift detection
 

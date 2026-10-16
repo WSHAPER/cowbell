@@ -155,7 +155,7 @@ export const agentStartOpts = z
   .default({})
   .refine((v) => !(v.model !== undefined && v.args !== undefined), {
     message:
-      "model and args are mutually exclusive — model compiles to `-m <model>` after `--`; pass args instead when you need full control of the agent argv",
+      "model and args are mutually exclusive — model compiles per kind to the agent's model flag (`mini -m` for opencode, `-m` otherwise) after `--`; pass args instead when you need full control of the agent argv",
   });
 
 export const worktreeCreateOpts = z

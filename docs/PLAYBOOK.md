@@ -35,7 +35,7 @@ When opencode's API drifts, `npm run reference:opencode` re-captures the operati
 
 ## Model selection (agent_start model + models_list)
 
-`agent_start`'s `model` param compiles to `-- -m <model>` (exclusive with `args`, never validated against a live list — spawn stays offline-safe). To eyeball discovery live:
+`agent_start`'s `model` param compiles per kind after `--` (`mini -m` for opencode — the full TUI has no model flag; `-m` for other kinds; exclusive with `args`, never validated against a live list — spawn stays offline-safe, unknown selectors fail only when first used). To eyeball discovery live:
 
 1. Call `models_list` — expect `default` at the top level and flagged on exactly one entry.
 2. Pick a selector from the result and start an agent with it — `herdr agent start` argv shows `-- -m <selector>` in the e2e log.

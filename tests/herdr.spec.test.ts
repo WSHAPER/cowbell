@@ -160,8 +160,8 @@ describe("agent argv pins (start)", () => {
   });
 });
 
-describe("agent argv pins (start: model selection)", () => {
-  it("model compiles to `-- -m <model>` (with variant riding along)", () => {
+describe("agent argv pins (start: opencode model selection)", () => {
+  it("opencode model compiles to `-- mini -m <model>` (full TUI has no model flag)", () => {
     expect(
       sa.agentStart("mesh", "opencode", "w36:p1", {
         model: "zai/glm-5.3",
@@ -176,9 +176,13 @@ describe("agent argv pins (start: model selection)", () => {
       "--pane",
       "w36:p1",
       "--",
+      "mini",
       "-m",
       "zai/glm-5.3",
     ]);
+  });
+
+  it("opencode model with timeoutMs keeps flag order and rides `#variant` along", () => {
     expect(
       sa.agentStart("mesh", "opencode", "w36:p1", {
         timeoutMs: 180_000,
@@ -196,6 +200,7 @@ describe("agent argv pins (start: model selection)", () => {
       "--timeout",
       "180000",
       "--",
+      "mini",
       "-m",
       "zai/glm-5.3#high",
     ]);
@@ -205,6 +210,28 @@ describe("agent argv pins (start: model selection)", () => {
     const argv = sa.agentStart("mesh", "opencode", "w36:p1").argv;
     expect(argv).not.toContain("-m");
     expect(argv).not.toContain("--");
+  });
+});
+
+describe("agent argv pins (start: model selection, non-opencode kinds)", () => {
+  it("non-opencode kinds keep the common `-m <model>` compilation", () => {
+    expect(
+      sa.agentStart("mesh", "claude", "w36:p1", {
+        model: "zai/glm-5.3",
+      }).argv,
+    ).toEqual([
+      "herdr",
+      "agent",
+      "start",
+      "mesh",
+      "--kind",
+      "claude",
+      "--pane",
+      "w36:p1",
+      "--",
+      "-m",
+      "zai/glm-5.3",
+    ]);
   });
 });
 

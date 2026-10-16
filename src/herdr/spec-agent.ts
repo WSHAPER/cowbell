@@ -145,11 +145,16 @@ export function agentWait(
  * (`--kind KIND --pane ID`) — there is no `--cwd`/`--workspace`.
  * Pair with workspaceCreate + pane targeting.
  *
- * `model` compiles internally to `-- -m <model>` (the agent binary
- * owns the flag vocabulary; herdr argv stays authoritative). It is
- * exclusive with `args` — both at once is a validation error, no
- * silent precedence. It is NOT checked against a live model list:
- * spawn stays offline-safe, discovery is models_list's job.
+ * `model` compiles per kind: opencode spawns `mini -m <model>` (the
+ * full TUI takes NO model flag — verified live on v2.0.27, which
+ * rejects `-m`/`--model` on the root command; `mini` is the
+ * interactive surface that accepts one), every other kind gets the
+ * common `-m <model>`. The agent binary owns the flag vocabulary;
+ * herdr argv stays authoritative. `model` is exclusive with `args` —
+ * both at once is a validation error, no silent precedence. It is
+ * NOT checked against a live model list: spawn stays offline-safe,
+ * discovery is models_list's job (an unknown selector starts fine
+ * and only fails when first used).
  */
 export function agentStart(
   name: string,
@@ -179,9 +184,14 @@ export function agentStart(
   ];
   if (opts.timeoutMs !== undefined)
     argv.push("--timeout", String(opts.timeoutMs));
-  if (opts.model !== undefined) argv.push("--", "-m", opts.model);
+  if (opts.model !== undefined) argv.push("--", ...modelArgv(kind, opts.model));
   else if (opts.args !== undefined) argv.push("--", ...opts.args);
   return { argv, surface: "agent start" };
+}
+
+/** Per-kind argv a `model` selector compiles to (see agentStart). */
+function modelArgv(kind: AgentKind, model: string): string[] {
+  return kind === "opencode" ? ["mini", "-m", model] : ["-m", model];
 }
 
 export function agentFocus(target: string): Spec {
