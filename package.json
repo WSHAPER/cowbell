@@ -26,7 +26,9 @@
     "reference:surface": "bash scripts/dump-upstream-surface.sh",
     "reference:opencode": "bash scripts/dump-opencode-surface.sh",
     "reference:opencode-models": "bash scripts/dump-opencode-models.sh",
+    "reference:herdr-events": "bash scripts/dump-herdr-events-surface.sh",
     "e2e": "bash scripts/e2e.sh",
+    "e2e:wait-own-pane": "node scripts/lib/wait-own-pane.mjs",
     "bench": "bash scripts/e2e.sh --bench"
   },
   "dependencies": {

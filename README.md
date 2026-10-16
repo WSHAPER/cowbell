@@ -83,7 +83,15 @@ Add to your MCP client config:
 | `agent_rename`   | Rename an agent                                              |
 | `models_list`    | List local opencode models, default marked (discovery)       |
 
-Every herdr-backed tool accepts optional `machine` or `remote` parameters (mutually exclusive). Without them, commands run against your local herdr session. Remote workspaces and agents are invisible in the local UI, so callers opt in per call. `models_list` is the one exception: it queries the local opencode API, where transport params do not apply, so it takes no parameters at all.
+### Waits (session-owned)
+
+| Tool          | Description                                                              |
+| ------------- | ------------------------------------------------------------------------ |
+| `wait_start`  | Non-blocking wait until a status; returns `{wait_id}` (timeout REQUIRED) |
+| `wait_status` | One (`wait_id`) or all waits owned by THIS cowbell process               |
+| `wait_cancel` | Cancel one (`wait_id`) or all owned waits                                |
+
+Every herdr-backed tool accepts optional `machine` or `remote` parameters (mutually exclusive). Without them, commands run against your local herdr session. Remote workspaces and agents are invisible in the local UI, so callers opt in per call. `models_list` and the wait tools are the exceptions: `models_list` queries the local opencode API and waits subscribe to the local herdr events socket, so transport params do not apply to either.
 
 ## Transcript view vs pane view
 
@@ -124,12 +132,39 @@ Discovery is the separate, read-only tool: `models_list` queries the local openc
 
 The `model` field is exactly the string `agent_start` wants (and `opencode mini -m` / `opencode run -m` accept); the default is returned at the top level and flagged on its entry (null when nothing is configured). No routing, no pool economy — just typed selection plus honest discovery.
 
+## Session-owned waits
+
+`wait_start` / `wait_status` / `wait_cancel` fix the collateral/leak/hang class of blocking waits **by construction**: a wait is a resource owned by the cowbell process that created it.
+
+- **In-memory, per-process, nothing else.** All wait state lives inside one cowbell instance — no files, no daemon, no durability. When the process dies, its waits die with it: an orchestrator's `pkill` can never touch another session's waits, and stale waits can never accumulate anywhere. Cross-session invisibility is the point: `wait_status` reports exactly what THIS process owns.
+- **Non-blocking by design.** `wait_start` returns `{wait_id}` immediately; poll `wait_status` (states: `pending | fired | timed_out`, `result` carries the status that fired). It is not a queue: no ordering, no priority, no delivery semantics — just owned status observation.
+- `timeout_ms` is **required** and enforced client-side — no wait can outlive its deadline, no matter what the transport does.
+- **Direct socket subscription.** Waits subscribe to the local herdr socket's `pane.agent_status_changed` events (newline-delimited JSON over `~/.config/herdr/herdr.sock`, or `HERDR_SOCKET_PATH`) rather than shelling out to `herdr agent wait` — that CLI primitive hangs intermittently, so cowbell routes around it. The current status is checked first via an authoritative `agent.list` read (already-matched targets fire immediately, no subscription at all).
+- **`events_lost` handling.** Per herdr socket semantics, when a subscriber falls behind retained history the server sends an `events_lost` error and closes the connection. cowbell then resubscribes and reconciles from a fresh authoritative read — buffered events are never replayed; the read is the truth after a gap. The same recovery covers plain stream death, and the deadline timer is never cleared during recovery (clearing it would resurrect the hang class).
+
+```json
+// wait_status -> { "waits": [ ... ] } or one record:
+{
+  "wait_id": "wait_1f0c…",
+  "target": "w4C:p1",
+  "pane_id": "w4C:p1",
+  "until": ["idle"],
+  "state": "fired",
+  "result": "idle",
+  "started_ms": 1792177611227
+}
+```
+
 ## Drift detection
 
 ```
 src/herdr/spec*.ts              every herdr command, single source (split by domain)
 tests/fixtures/herdr-surface.txt     captured --help output
 tests/upstream.drift.test.ts         cross-checks spec vs fixture
+
+src/herdr/socket.ts             raw herdr events-socket client (waits)
+tests/fixtures/herdr-events-surface.json   captured events.subscribe contract
+tests/herdr-events.drift.test.ts  cross-checks socket tokens vs fixture
 
 src/opencode/spec.ts            every opencode api call, single source
 tests/fixtures/opencode-session-message.json   captured operation
@@ -144,6 +179,15 @@ When herdr renames a flag or subcommand:
 npm run reference:update    # pull upstream source
 npm run reference:surface   # re-capture --help tree
 npm test                    # names the exact broken builder
+```
+
+When herdr renames the events socket surface (`events.subscribe`, the
+`pane.agent_status_changed` subscription variant, or the pushed event
+contract the wait registry reads):
+
+```bash
+npm run reference:herdr-events   # re-capture the events contract
+npm test                         # names the exact token
 ```
 
 When opencode renames the message operation, its parameters, or the
@@ -175,6 +219,7 @@ npm run typecheck      # tsc --noEmit
 npm run lint           # eslint (typechecked)
 npm run test           # vitest
 npm run e2e            # full loop against live herdr
+npm run e2e:wait-own-pane -- /tmp/evidence.json   # own-pane wait-until-idle live e2e
 npm run bench          # e2e + hyperfine
 ```
 

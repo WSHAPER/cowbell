@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { parseJsonOrThrow } from "../parse.js";
+import { parseJsonOrThrow, parseOrThrow } from "../parse.js";
 
 /**
  * OUTPUT contracts for the herdr commands whose stdout cowbell parses
@@ -69,6 +69,13 @@ const agentListEnvelope = z
   })
   .passthrough();
 
+const agentListResult = z
+  .object({
+    agents: z.array(agentEntrySchema),
+    type: z.literal("agent_list"),
+  })
+  .passthrough();
+
 const DRIFT = "herdr output drifted from the expected shape";
 
 /** Parse `herdr agent get <target>` stdout. Throws on contract drift. */
@@ -81,4 +88,14 @@ export function parseAgentInfo(stdout: string): AgentEntry {
 export function parseAgentList(stdout: string): AgentEntry[] {
   return parseJsonOrThrow("parseAgentList", agentListEnvelope, stdout, DRIFT)
     .result.agents;
+}
+
+/**
+ * Parse an `agent.list` RESULT (the `result` half of the envelope) —
+ * the socket API returns the same body the CLI wraps, and the wait
+ * registry reads it straight off the socket.
+ */
+export function parseAgentListResult(result: unknown): AgentEntry[] {
+  return parseOrThrow("parseAgentListResult", agentListResult, result, DRIFT)
+    .agents;
 }

@@ -43,6 +43,15 @@ export const agentStatus = z.enum([
   "unknown",
 ]);
 
+/**
+ * The canonical agent-status vocabulary — the zod enum above, unzipped.
+ * schemas.ts owns it because BOTH the CLI spec layer (agent wait
+ * --until) and the raw socket wire layer (pane.agent_status_changed)
+ * validate against it; spec-agent.ts re-exports for its consumers.
+ */
+export const AGENT_STATUSES = agentStatus.options;
+export type AgentStatus = (typeof AGENT_STATUSES)[number];
+
 export const agentKind = z.enum([
   "pi",
   "claude",

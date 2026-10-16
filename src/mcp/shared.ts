@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { runHerdr } from "../herdr/exec.js";
-import { AGENT_KINDS } from "../herdr/spec-agent.js";
+import { AGENT_KINDS, AGENT_STATUSES } from "../herdr/spec-agent.js";
 import type {
   AgentKind,
   AgentStatus,
@@ -22,6 +22,8 @@ const remote = z
   .string()
   .optional()
   .describe("SSH target — run on a remote herdr session instead of local");
+
+export type { TransportParams } from "./transport.js";
 
 /** Merge transport params into a shape and derive the parsed transport. */
 export const withT = <S extends z.ZodRawShape>(shape: S) => ({
@@ -115,6 +117,41 @@ export type WaitParams = TransportParams & {
   statuses: AgentStatus[];
   timeout_ms?: number;
 };
+
+/**
+ * wait_start's REGISTERED input shape — timeout_ms is REQUIRED (the
+ * wait never outlives it) and there are deliberately NO transport
+ * params: waits subscribe to the LOCAL herdr socket, so machine/remote
+ * do not apply.
+ */
+export const waitStartShape = {
+  target: z
+    .string()
+    .describe(
+      "Agent name or hosting pane id — resolved via the local session's agent list",
+    ),
+  until: z
+    .array(z.enum(AGENT_STATUSES))
+    .min(1)
+    .describe(
+      'Statuses that fire the wait, e.g. ["idle"] or ["blocked","done"]',
+    ),
+  timeout_ms: z
+    .number()
+    .int()
+    .positive()
+    .describe(
+      "REQUIRED client-side deadline in ms — the wait is abandoned as timed_out when it passes",
+    ),
+};
+export type WaitStartParams = {
+  target: string;
+  until: AgentStatus[];
+  timeout_ms: number;
+};
+export type WaitStatusParams = { wait_id?: string };
+export type WaitCancelParams = { wait_id?: string; all?: boolean };
+
 export type StartParams = TransportParams & {
   name: string;
   kind: AgentKind;

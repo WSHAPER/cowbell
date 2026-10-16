@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { parseOrThrow as v } from "../parse.js";
 import * as sc from "./schemas.js";
+import type { AgentStatus } from "./schemas.js";
 import type { PaneSource, Spec } from "./spec.js";
 
 /**
@@ -8,15 +9,11 @@ import type { PaneSource, Spec } from "./spec.js";
  * verified 2026-10-06).
  */
 
-/** Agent status vocabulary herdr accepts for `--until`. */
-export const AGENT_STATUSES = [
-  "idle",
-  "working",
-  "blocked",
-  "done",
-  "unknown",
-] as const;
-export type AgentStatus = (typeof AGENT_STATUSES)[number];
+export { AGENT_STATUSES } from "./schemas.js";
+export type { AgentStatus } from "./schemas.js";
+
+/** Agent status vocabulary herdr accepts for `--until` — re-exported
+ * from schemas.ts, the canonical home (see AGENT_STATUSES there). */
 
 /** herdr agent kinds (from `agent start --help`). */
 export const AGENT_KINDS = [
