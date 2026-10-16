@@ -8,6 +8,11 @@
 // goes idle (i.e. when the agent that launched this script finishes
 // its turn). Evidence is written to the JSON path in argv[2].
 //
+// CAVEAT (found live): launch this DETACHED (setsid/nohup), not as a
+// tracked background task of the watched agent — a tracked task keeps
+// the agent's session "working", so the pane never idles and the wait
+// can only time out. The watcher must not keep the watched busy.
+//
 //   node scripts/lib/wait-own-pane.mjs <evidence.json> [timeout_ms]
 //
 // Requires `npm run build` (uses dist/). Exit 0 only when fired.
