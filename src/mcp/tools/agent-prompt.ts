@@ -1,7 +1,14 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import * as agents from "../../herdr/spec-agent.js";
-import { withT, transport, text, exec, target } from "../shared.js";
+import {
+  withT,
+  transport,
+  text,
+  exec,
+  target,
+  deliverWhenSchema,
+} from "../shared.js";
 import type { PromptParams, WaitParams } from "../shared.js";
 
 export function registerAgentPromptTools(server: McpServer): void {
@@ -13,10 +20,7 @@ export function registerAgentPromptTools(server: McpServer): void {
     withT({
       target,
       text: z.string(),
-      deliver_when: z
-        .enum(["now", "idle"])
-        .default("now")
-        .describe("now: submit immediately; idle: wait for idle, then submit"),
+      deliver_when: deliverWhenSchema,
       wait: z.boolean().optional(),
       until: z.array(z.enum(agents.AGENT_STATUSES)).optional(),
       timeout_ms: z.number().int().positive().optional(),

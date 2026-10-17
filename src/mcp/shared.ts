@@ -50,6 +50,27 @@ export const paneId = z.string().describe("Pane id, e.g. w36:p1");
 export const target = z.string().describe("Agent name or hosting pane id");
 
 /**
+ * Pane-read source vocabulary — herdr's read modes. Named once here
+ * (the AGENT_KINDS/AGENT_STATUSES precedent) because THREE
+ * registrations consume it: pane_read and agent_read tool params
+ * (optional) and the agent_messages pane_fallback result contract
+ * (required). spec.ts's PaneSource is the type twin.
+ */
+const READ_SOURCES = ["visible", "recent", "recent-unwrapped"] as const;
+export const readSourceSchema = z.enum(READ_SOURCES);
+
+/**
+ * When agent_prompt submits the text — the MCP twin of
+ * PromptDelivery in spec-agent.ts: `now` (immediately, the default)
+ * or `idle` (queue-of-one: wait for idle first, then submit).
+ */
+const DELIVER_WHEN = ["now", "idle"] as const;
+export const deliverWhenSchema = z
+  .enum(DELIVER_WHEN)
+  .default("now")
+  .describe("now: submit immediately; idle: wait for idle, then submit");
+
+/**
  * agent_start's REGISTERED input shape, exported (not inline in
  * server.ts) so the schema↔StartParams linkage can be compile-pinned
  * via z.infer in the test suite — the F1 lesson: zod strips an

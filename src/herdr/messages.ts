@@ -3,6 +3,7 @@ import { execOpenCode, fetchMessages } from "../opencode/client.js";
 import { transcriptMessageSchema } from "../opencode/schemas.js";
 import { sessionId } from "../opencode/spec.js";
 import { parseOrThrow } from "../parse.js";
+import { readSourceSchema } from "../mcp/shared.js";
 import { runHerdr } from "./exec.js";
 import { parseAgentInfo, type AgentSession } from "./outputs.js";
 import { agentGet, agentRead } from "./spec-agent.js";
@@ -44,7 +45,7 @@ export const agentMessagesResultSchema = z.discriminatedUnion("channel", [
       pane: z
         .object({
           lines: z.number().int().min(1),
-          source: z.enum(["visible", "recent", "recent-unwrapped"]),
+          source: readSourceSchema,
         })
         .strict(),
       text: z.string(),
@@ -52,6 +53,30 @@ export const agentMessagesResultSchema = z.discriminatedUnion("channel", [
     .strict(),
 ]);
 export type AgentMessagesResult = z.output<typeof agentMessagesResultSchema>;
+
+/**
+ * The pane_fallback reason vocabulary — named so a reviewer reads
+ * WHY the transcript degraded without unpacking template blobs.
+ * The dynamic parts (agent identity, session source, error message)
+ * are interpolated at the use sites; the strings produced are the
+ * published contract (pinned by regex in tests/agent.messages.test.ts).
+ */
+
+/** Transport was machine/remote: structured transcripts are local-session only. */
+const REASON_REMOTE_TRANSPORT =
+  "structured transcripts are local-session only; machine/remote transports read the pane";
+
+/** No native agent_session (pane-level agent); `id` is the JSON-quoted agent identity. */
+const REASON_NO_NATIVE_SESSION = (id: string): string =>
+  `agent ${id} has no native agent_session (pane-level agent)`;
+
+/** Native agent_session exists but is not an opencode session; `source` is JSON-quoted. */
+const REASON_NON_OPENCODE_SOURCE = (source: string): string =>
+  `agent_session source ${source} is not an opencode session`;
+
+/** The local opencode api call failed with `message` (spawn/network error). */
+const REASON_API_UNREACHABLE = (message: string): string =>
+  `opencode api unreachable: ${message}`;
 
 export interface MessagesDeps {
   /** Runs a herdr spec (agent get / agent read). */
@@ -93,18 +118,19 @@ export async function agentMessages(
   const session = info.agent_session;
   if (opts.transport) {
     return paneFallback(deps, target, opts, {
-      reason:
-        "structured transcripts are local-session only; machine/remote transports read the pane",
+      reason: REASON_REMOTE_TRANSPORT,
     });
   }
   if (!session) {
     return paneFallback(deps, target, opts, {
-      reason: `agent ${JSON.stringify(info.name ?? info.pane_id ?? target)} has no native agent_session (pane-level agent)`,
+      reason: REASON_NO_NATIVE_SESSION(
+        JSON.stringify(info.name ?? info.pane_id ?? target),
+      ),
     });
   }
   if (!isNativeOpenCodeSession(session)) {
     return paneFallback(deps, target, opts, {
-      reason: `agent_session source ${JSON.stringify(session.source)} is not an opencode session`,
+      reason: REASON_NON_OPENCODE_SOURCE(JSON.stringify(session.source)),
     });
   }
 
@@ -122,7 +148,7 @@ export async function agentMessages(
     });
   } catch (err) {
     return paneFallback(deps, target, opts, {
-      reason: `opencode api unreachable: ${(err as Error).message}`,
+      reason: REASON_API_UNREACHABLE((err as Error).message),
     });
   }
 }

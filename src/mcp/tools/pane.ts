@@ -1,7 +1,14 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import * as panes from "../../herdr/spec-pane.js";
-import { withT, transport, text, exec, paneId } from "../shared.js";
+import {
+  withT,
+  transport,
+  text,
+  exec,
+  paneId,
+  readSourceSchema,
+} from "../shared.js";
 import type {
   PaneParams,
   ReadPaneParams,
@@ -25,7 +32,7 @@ export function registerPaneTools(server: McpServer): void {
     withT({
       pane: paneId,
       lines: z.number().int().min(1).max(2000).optional(),
-      source: z.enum(["visible", "recent", "recent-unwrapped"]).optional(),
+      source: readSourceSchema.optional(),
     }),
     async (v: ReadPaneParams) =>
       text(

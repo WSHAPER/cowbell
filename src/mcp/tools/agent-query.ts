@@ -1,7 +1,14 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import * as agents from "../../herdr/spec-agent.js";
-import { withT, transport, text, exec, target } from "../shared.js";
+import {
+  withT,
+  transport,
+  text,
+  exec,
+  target,
+  readSourceSchema,
+} from "../shared.js";
 import type {
   TransportParams,
   TargetParams,
@@ -31,7 +38,7 @@ export function registerAgentQueryTools(server: McpServer): void {
     withT({
       target,
       lines: z.number().int().min(1).max(2000).optional(),
-      source: z.enum(["visible", "recent", "recent-unwrapped"]).optional(),
+      source: readSourceSchema.optional(),
     }),
     async (v: ReadAgentParams) =>
       text(
