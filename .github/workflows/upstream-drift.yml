@@ -1,0 +1,85 @@
+name: upstream-drift
+
+# Daily herdr release probe. When a release newer than the pinned
+# SUPPORTED_HERDR_VERSION ships, install it, re-capture the CLI surface
+# FROM IT, and run the full suite + live e2e against the new binary:
+#   green  -> new release exists, cowbell is compatible with it
+#   red    -> upstream drift, the pinned grammar broke something
+# No new release -> early exit green in ~30s (no install, no noise).
+# Scheduled-workflow failures notify the repo owner by default; the
+# run summary always names the release under test.
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+    inputs:
+      herdr_version:
+        description: "Probe a specific version (defaults to latest release)"
+        required: false
+        type: string
+
+concurrency:
+  group: upstream-drift
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Resolve pinned vs latest release
+        id: rel
+        run: |
+          set -euo pipefail
+          PINNED="$(grep -oP 'SUPPORTED_HERDR_VERSION = "\K[^"]+' src/herdr/spec.ts)"
+          LATEST="${{ inputs.herdr_version }}"
+          if [[ -z "$LATEST" ]]; then
+            LATEST="$(gh api repos/herdrdev/herdr/releases/latest --jq '.tag_name | ltrimstr("v")')"
+          fi
+          echo "pinned=$PINNED latest=$LATEST"
+          {
+            echo "pinned=$PINNED"
+            echo "latest=$LATEST"
+            echo "uptodate=$([[ "$PINNED" == "$LATEST" ]] && echo true || echo false)"
+          } >>"$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Early exit when the pin is current
+        if: steps.rel.outputs.uptodate == 'true'
+        run: echo "herdr ${{ steps.rel.outputs.latest }} == pin ${{ steps.rel.outputs.pinned }}, nothing to probe" >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Install the new herdr release
+        if: steps.rel.outputs.uptodate != 'true'
+        run: |
+          set -euo pipefail
+          V="${{ steps.rel.outputs.latest }}"
+          # Asset naming re-verified per bump protocol (bare binaries).
+          curl -fsSL "https://github.com/herdrdev/herdr/releases/download/v${V}/herdr-linux-x86_64" \
+            -o /usr/local/bin/herdr
+          chmod +x /usr/local/bin/herdr
+          herdr --version
+
+      - name: Re-capture the CLI surface from the new binary
+        if: steps.rel.outputs.uptodate != 'true'
+        run: |
+          npm ci
+          npm run reference:surface
+          echo "### upstream-drift probe: herdr ${{ steps.rel.outputs.latest }} (pin ${{ steps.rel.outputs.pinned }})" >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Suite against the new surface
+        if: steps.rel.outputs.uptodate != 'true'
+        run: npm test
+
+      - name: Live e2e against the new binary
+        if: steps.rel.outputs.uptodate != 'true'
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq tmux >/dev/null
+          npm run e2e
