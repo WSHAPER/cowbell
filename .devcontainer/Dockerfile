@@ -4,12 +4,13 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends git tmux curl ca-certificates hyperfine \
  && rm -rf /var/lib/apt/lists/*
 
-# herdr release binary (the substrate under test)
+# herdr release binary (the substrate under test). Releases ship bare
+# binaries named herdr-<os>-<arch> (the 0.9.5 tarball asset no longer
+# exists; asset list verified via the GitHub API).
 ARG HERDR_VERSION=0.9.5
-RUN curl -fsSL "https://github.com/herdrdev/herdr/releases/download/v${HERDR_VERSION}/herdr-${HERDR_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
-      -o /tmp/herdr.tgz \
- && tar -xzf /tmp/herdr.tgz -C /usr/local/bin --strip-components=1 \
- && rm /tmp/herdr.tgz \
+RUN curl -fsSL "https://github.com/herdrdev/herdr/releases/download/v${HERDR_VERSION}/herdr-linux-x86_64" \
+      -o /usr/local/bin/herdr \
+ && chmod +x /usr/local/bin/herdr \
  && herdr --version
 
 WORKDIR /workspace
