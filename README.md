@@ -70,6 +70,8 @@ Add to your MCP client config:
 
 ### Agents
 
+<!-- [lane-anchor:agent-health-readme] feat/agent-health: replace with the agent_health tool row -->
+
 | Tool             | Description                                                  |
 | ---------------- | ------------------------------------------------------------ |
 | `agent_list`     | List recognized agents                                       |
@@ -84,6 +86,8 @@ Add to your MCP client config:
 | `models_list`    | List local opencode models, default marked (discovery)       |
 
 ### Waits (session-owned)
+
+<!-- [lane-anchor:report-wait-readme] feat/report-wait: replace with the file_wait tool row(s) -->
 
 | Tool          | Description                                                              |
 | ------------- | ------------------------------------------------------------------------ |

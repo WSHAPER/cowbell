@@ -10,6 +10,7 @@ import { registerModelTools } from "./tools/models.js";
 import { registerAgentPromptTools } from "./tools/agent-prompt.js";
 import { registerAgentControlTools } from "./tools/agent-control.js";
 import { registerWaitTools } from "./tools/wait.js";
+import { registerAgentHealthTools } from "./tools/agent-health.js";
 import { registerMachineTools } from "./tools/machine.js";
 import { registerSessionTools } from "./tools/session.js";
 import { registerTabTools } from "./tools/tab.js";
@@ -43,6 +44,7 @@ function buildServer(): McpServer {
   registerMachineTools(server);
   registerSessionTools(server);
   registerTabTools(server);
+  registerAgentHealthTools(server);
   return server;
 }
 
