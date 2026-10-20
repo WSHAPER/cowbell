@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import type { Stats } from "node:fs";
+import { readFile, stat } from "node:fs/promises";
 import { z } from "zod";
 import { parseOrThrow } from "../parse.js";
 import { parseAgentListResult, type AgentEntry } from "./outputs.js";
@@ -30,12 +32,31 @@ import {
  * timeout client-side. Per herdr socket semantics, an events_lost
  * error (or any stream death) means resubscribe + reconcile via an
  * authoritative agent list read — buffered events are never replayed.
+ *
+ * The registry also hosts FILE waits (file_wait_start): the
+ * status-independent completion signal for report-marker watching.
+ * Same ownership rules, same wait_id namespace, same
+ * wait_status/wait_cancel surface — ids from both kinds intermix in
+ * one registry. A file wait fires when the watched file contains a
+ * line matching the marker regex AND the file has been quiet
+ * (mtime+size unchanged) for stability_ms — the quiet window is the
+ * cure for progressively-written reports firing early. File waits
+ * poll (fs.stat + cached readFile, serialized per path, no fs.watch —
+ * network mounts stay supported) instead of subscribing to the
+ * socket, so they work for agents whose status never leaves idle
+ * (e.g. minimal-interface model spawns). A watched file that
+ * disappears mid-wait fails the wait (state "failed" + reason) rather
+ * than rotting in pending.
  */
 
-export const WAIT_STATES = ["pending", "fired", "timed_out"] as const;
+/**
+ * "failed" is reachable ONLY by file waits (watched file deleted /
+ * unreadable). Status waits keep their exact three-state behavior.
+ */
+export const WAIT_STATES = ["pending", "fired", "timed_out", "failed"] as const;
 export type WaitState = (typeof WAIT_STATES)[number];
 
-/** The wait_status record contract. */
+/** The wait_status record contract (status waits). */
 export const waitRecordSchema = z
   .object({
     wait_id: z.string(),
@@ -47,16 +68,89 @@ export const waitRecordSchema = z
     started_ms: z.number().int().nonnegative(),
   })
   .strict();
-export type WaitRecord = z.output<typeof waitRecordSchema>;
+/** The wait_status record contract (file waits — `target` is the path). */
+const fileWaitResultSchema = z
+  .object({
+    line: z.string(),
+    mtime_ms: z.number().int().nonnegative(),
+  })
+  .strict();
+export const fileWaitRecordSchema = z
+  .object({
+    wait_id: z.string(),
+    target: z.string(),
+    marker: z.string(),
+    stability_ms: z.number().int().positive(),
+    timeout_ms: z.number().int().positive(),
+    state: z.enum(WAIT_STATES),
+    result: fileWaitResultSchema.optional(),
+    /** Present only on state "failed" — why the watch died. */
+    reason: z.string().optional(),
+    started_ms: z.number().int().nonnegative(),
+  })
+  .strict();
+type FileWaitResult = z.output<typeof fileWaitResultSchema>;
+export type StatusWaitRecord = z.output<typeof waitRecordSchema>;
+export type FileWaitRecord = z.output<typeof fileWaitRecordSchema>;
+/** Either kind — one registry, one id namespace, intermixed in wait_status. */
+export type WaitRecord = StatusWaitRecord | FileWaitRecord;
 
 /** Backoff between resubscribe attempts (ms), capped at the last step. */
 const RESUBSCRIBE_BACKOFF_MS = [0, 100, 200, 400, 800, 1600, 2000];
 
+/** File-wait poll cadence: clamp(stability_ms / 5) into [50ms, 1s]. */
+const MIN_POLL_MS = 50;
+const MAX_POLL_MS = 1_000;
+const pollIntervalMs = (stabilityMs: number): number =>
+  Math.min(MAX_POLL_MS, Math.max(MIN_POLL_MS, Math.round(stabilityMs / 5)));
+
+const filePathInput = z
+  .string()
+  .min(1)
+  .refine((p) => p.startsWith("/"), {
+    message: "path must be absolute — report watches are local to THIS process",
+  });
+
 interface LiveWait {
-  record: WaitRecord;
+  record: StatusWaitRecord;
   stream?: AgentStatusStream;
   timer?: ReturnType<typeof setTimeout>;
   attempts: number;
+}
+
+/** A live FILE wait — one watched path, one marker, one quiet window. */
+interface LiveFileWait {
+  record: FileWaitRecord;
+  /** Set EXACTLY ONCE at start; the timeout backstop nothing can extend. */
+  deadline?: ReturnType<typeof setTimeout>;
+  markerRe: RegExp;
+  /** Last observed "mtimeMs:size" signature — changes reset the quiet clock. */
+  baseline: string;
+  /** When the file last changed (observation time; mtime at start). */
+  lastChange: number;
+  /** Cached marker hit (line) for the current baseline, if any. */
+  matchedLine?: string;
+}
+
+/** stat signature + content cache: what one poll tick observes per path. */
+interface PathSnapshot {
+  sig: string;
+  content: string;
+  mtimeMs: number;
+}
+
+/**
+ * Per-path poller shared by every wait watching the same file: ONE
+ * stat + at most ONE readFile per tick, fanned out to all waits —
+ * polls are serialized per file, never concurrent on the same path.
+ */
+interface PathWatch {
+  timer: ReturnType<typeof setInterval>;
+  intervalMs: number;
+  ticking: boolean;
+  waits: Set<LiveFileWait>;
+  /** Refreshed only when the stat signature moves. */
+  cached?: PathSnapshot;
 }
 
 export interface WaitRegistryOpts {
@@ -67,6 +161,8 @@ export interface WaitRegistryOpts {
 /** One registry per process — the ownership boundary itself. */
 export class WaitRegistry {
   private readonly waits = new Map<string, LiveWait>();
+  private readonly fileWaits = new Map<string, LiveFileWait>();
+  private readonly pathWatches = new Map<string, PathWatch>();
 
   constructor(private readonly opts: WaitRegistryOpts = {}) {}
 
@@ -81,7 +177,7 @@ export class WaitRegistry {
     target: string,
     until: AgentStatus[],
     timeoutMs: number,
-  ): Promise<WaitRecord> {
+  ): Promise<StatusWaitRecord> {
     target = parseOrThrow("waitStart", sc.agentTarget, target);
     until = parseOrThrow("waitStart", z.array(sc.agentStatus).min(1), until);
     timeoutMs = parseOrThrow("waitStart", sc.timeoutMs, timeoutMs);
@@ -111,13 +207,78 @@ export class WaitRegistry {
     return wait.record;
   }
 
-  /** One wait (wait_id) or every wait owned by THIS process. */
+  /**
+   * Register a pending FILE wait: fire when `path` contains a line
+   * matching the `marker` regex AND the file has been quiet
+   * (mtime+size unchanged) for `stabilityMs`. Mirrors waitStart's
+   * current-state-first discipline: a marker that is already present
+   * in an already-quiet file fires IMMEDIATELY, with no poller armed.
+   * The path must exist and be a regular file at start — an honest
+   * immediate error beats a wait that can only ever time out (the
+   * waitStart/resolveTarget precedent). A file deleted mid-wait
+   * fails the wait with a reason instead of rotting in pending.
+   */
+  async fileWaitStart(
+    path: string,
+    marker: string,
+    stabilityMs: number,
+    timeoutMs: number,
+  ): Promise<FileWaitRecord> {
+    path = parseOrThrow("fileWaitStart", filePathInput, path);
+    marker = parseOrThrow("fileWaitStart", sc.nonEmptyText, marker);
+    stabilityMs = parseOrThrow(
+      "fileWaitStart",
+      z.number().int().positive(),
+      stabilityMs,
+    );
+    timeoutMs = parseOrThrow("fileWaitStart", sc.timeoutMs, timeoutMs);
+    const markerRe = compileMarkerRe(marker);
+    const st = await statReportFile(path);
+    const wait = liveFileWait(markerRe, st, {
+      path,
+      marker,
+      stabilityMs,
+      timeoutMs,
+    });
+    this.fileWaits.set(wait.record.wait_id, wait);
+
+    let content: string;
+    try {
+      content = await readFile(path, "utf8");
+    } catch {
+      this.fileWaits.delete(wait.record.wait_id);
+      throw new Error(
+        `fileWaitStart: path ${JSON.stringify(path)} vanished before the watch started`,
+      );
+    }
+    const line = matchLine(markerRe, content);
+    if (line !== undefined && Date.now() - wait.lastChange >= stabilityMs) {
+      // Integer ms contract: stat.mtimeMs is fractional on Linux.
+      this.fileFire(wait, line, Math.round(st.mtimeMs));
+      return wait.record;
+    }
+    wait.matchedLine = line;
+    // Same discipline as waitStart's deadline: set EXACTLY ONCE, the
+    // backstop no poll outcome can extend.
+    wait.deadline = setTimeout(
+      () => this.fileFinish(wait, "timed_out"),
+      timeoutMs,
+    );
+    this.joinPathWatch(wait);
+    return wait.record;
+  }
+
+  /** One wait of either kind (wait_id) or every wait owned by THIS process. */
   waitStatus(waitId?: string): WaitRecord | { waits: WaitRecord[] } {
     if (waitId === undefined)
-      return { waits: [...this.waits.values()].map((w) => w.record) };
-    const wait = this.waits.get(
-      parseOrThrow("waitStatus", sc.nonEmptyText, waitId),
-    );
+      return {
+        waits: [
+          ...[...this.waits.values()].map((w) => w.record),
+          ...[...this.fileWaits.values()].map((w) => w.record),
+        ],
+      };
+    const id = parseOrThrow("waitStatus", sc.nonEmptyText, waitId);
+    const wait = this.waits.get(id) ?? this.fileWaits.get(id);
     if (!wait)
       throw new Error(
         `waitStatus: wait_id ${JSON.stringify(waitId)} is not owned by this cowbell process`,
@@ -125,7 +286,7 @@ export class WaitRegistry {
     return wait.record;
   }
 
-  /** Forget one ({wait_id}) or every ({all: true}) owned wait. */
+  /** Forget one ({wait_id}) or every ({all: true}) owned wait — either kind. */
   waitCancel(input: { wait_id?: string; all?: boolean }): {
     cancelled: string[];
   } {
@@ -142,19 +303,25 @@ export class WaitRegistry {
         }),
       input,
     );
-    const doomed =
-      v.all === true
-        ? [...this.waits.values()]
-        : [this.waits.get(v.wait_id!)].filter(
-            (w): w is LiveWait => w !== undefined,
-          );
-    if (v.all !== true && doomed.length === 0)
-      throw new Error(
-        `waitCancel: wait_id ${JSON.stringify(v.wait_id)} is not owned by this cowbell process`,
-      );
+    let doomed: Array<LiveWait | LiveFileWait>;
+    if (v.all === true)
+      doomed = [...this.waits.values(), ...this.fileWaits.values()];
+    else {
+      const hit = this.waits.get(v.wait_id!) ?? this.fileWaits.get(v.wait_id!);
+      if (!hit)
+        throw new Error(
+          `waitCancel: wait_id ${JSON.stringify(v.wait_id)} is not owned by this cowbell process`,
+        );
+      doomed = [hit];
+    }
     for (const wait of doomed) {
-      this.teardown(wait);
-      this.waits.delete(wait.record.wait_id);
+      if (isLiveFileWait(wait)) {
+        this.fileTeardown(wait);
+        this.fileWaits.delete(wait.record.wait_id);
+      } else {
+        this.teardown(wait);
+        this.waits.delete(wait.record.wait_id);
+      }
     }
     return { cancelled: doomed.map((w) => w.record.wait_id) };
   }
@@ -263,6 +430,165 @@ export class WaitRegistry {
     wait.stream?.close();
     wait.stream = undefined;
   }
+
+  /** Attach a file wait to its path's shared poller (creating it if needed). */
+  private joinPathWatch(wait: LiveFileWait): void {
+    const path = wait.record.target;
+    let watch = this.pathWatches.get(path);
+    if (watch === undefined) {
+      watch = {
+        timer: setInterval(
+          () => void this.pollPath(path),
+          pollIntervalMs(wait.record.stability_ms),
+        ),
+        intervalMs: pollIntervalMs(wait.record.stability_ms),
+        ticking: false,
+        waits: new Set(),
+      };
+      // Internal machinery, like the recover() retry: never pins the
+      // event loop — waits die with the process by design anyway.
+      watch.timer.unref();
+      this.pathWatches.set(path, watch);
+    } else {
+      this.recalcPathInterval(path, watch);
+    }
+    watch.waits.add(wait);
+  }
+
+  /** Detach a file wait; drop the poller entirely when its last wait leaves. */
+  private leavePathWatch(wait: LiveFileWait): void {
+    const path = wait.record.target;
+    const watch = this.pathWatches.get(path);
+    if (watch === undefined) return;
+    watch.waits.delete(wait);
+    if (watch.waits.size === 0) {
+      clearInterval(watch.timer);
+      this.pathWatches.delete(path);
+    } else {
+      this.recalcPathInterval(path, watch);
+    }
+  }
+
+  /** Fastest-wanted cadence wins: short stability windows poll tighter. */
+  private recalcPathInterval(path: string, watch: PathWatch): void {
+    const wanted = Math.min(
+      ...[...watch.waits].map((w) => pollIntervalMs(w.record.stability_ms)),
+    );
+    if (wanted === watch.intervalMs) return;
+    clearInterval(watch.timer);
+    watch.timer = setInterval(() => void this.pollPath(path), wanted);
+    watch.timer.unref();
+    watch.intervalMs = wanted;
+  }
+
+  /**
+   * One tick for one path: a single authoritative stat, at most one
+   * readFile (only when the stat signature moved), then fan out to
+   * every pending wait on that path. Overlapping ticks are skipped —
+   * polls are strictly serialized per file, which is what makes a
+   * slow network mount degrade to slow, never to racing reads.
+   */
+  private async pollPath(path: string): Promise<void> {
+    const watch = this.pathWatches.get(path);
+    if (watch === undefined || watch.ticking) return;
+    const pending = [...watch.waits].filter(
+      (w) => w.record.state === "pending",
+    );
+    if (pending.length === 0) return;
+    watch.ticking = true;
+    try {
+      const snapshot = await this.refreshSnapshot(path, watch, pending);
+      if (snapshot === undefined) return; // IO failure: waits already failed
+      const now = Date.now();
+      for (const w of pending) this.tickFileWait(w, snapshot, now);
+    } finally {
+      watch.ticking = false;
+    }
+  }
+
+  /**
+   * Stat the path and keep the content cache fresh (re-read only when
+   * the mtime+size signature moved). undefined means the file became
+   * unobservable — every pending wait on it has been failed with a
+   * reason, so the tick has nothing left to do.
+   */
+  private async refreshSnapshot(
+    path: string,
+    watch: PathWatch,
+    pending: LiveFileWait[],
+  ): Promise<PathSnapshot | undefined> {
+    let st: Awaited<ReturnType<typeof stat>>;
+    try {
+      st = await stat(path);
+    } catch (err) {
+      this.failPending(pending, ioFailureReason("stat", path, err));
+      return undefined;
+    }
+    const sig = `${st.mtimeMs}:${st.size}`;
+    if (watch.cached?.sig === sig) return watch.cached;
+    try {
+      watch.cached = {
+        sig,
+        content: await readFile(path, "utf8"),
+        mtimeMs: Math.round(st.mtimeMs),
+      };
+    } catch (err) {
+      this.failPending(pending, ioFailureReason("read", path, err));
+      return undefined;
+    }
+    return watch.cached;
+  }
+
+  /**
+   * One wait against one snapshot: a changed signature resets the
+   * quiet clock — the false-positive cure, a marker seen mid-write
+   * cannot fire until the writer goes quiet for the full window —
+   * and a marker present in a file quiet long enough fires.
+   */
+  private tickFileWait(w: LiveFileWait, snap: PathSnapshot, now: number): void {
+    if (w.baseline !== snap.sig) {
+      w.baseline = snap.sig;
+      w.lastChange = now;
+      w.matchedLine = matchLine(w.markerRe, snap.content);
+    }
+    if (
+      w.matchedLine !== undefined &&
+      now - w.lastChange >= w.record.stability_ms
+    )
+      this.fileFire(w, w.matchedLine, snap.mtimeMs);
+  }
+
+  private failPending(pending: LiveFileWait[], reason: string): void {
+    for (const w of pending) this.fileFail(w, reason);
+  }
+
+  private fileFire(wait: LiveFileWait, line: string, mtimeMs: number): void {
+    this.fileFinish(wait, "fired", { line, mtime_ms: mtimeMs });
+  }
+
+  private fileFail(wait: LiveFileWait, reason: string): void {
+    this.fileFinish(wait, "failed", undefined, reason);
+  }
+
+  private fileFinish(
+    wait: LiveFileWait,
+    state: WaitState,
+    result?: FileWaitResult,
+    reason?: string,
+  ): void {
+    if (wait.record.state !== "pending") return;
+    wait.record = { ...wait.record, state, result, reason };
+    this.fileTeardown(wait);
+  }
+
+  /** Terminal teardown: deadline timer AND poller membership. */
+  private fileTeardown(wait: LiveFileWait): void {
+    if (wait.deadline !== undefined) {
+      clearTimeout(wait.deadline);
+      wait.deadline = undefined;
+    }
+    this.leavePathWatch(wait);
+  }
 }
 
 /** Agent list status is optional and may drift — absent/unknown maps to "unknown". */
@@ -270,6 +596,94 @@ function statusOf(entry: AgentEntry): AgentStatus {
   return AGENT_STATUSES.includes(entry.agent_status as AgentStatus)
     ? (entry.agent_status as AgentStatus)
     : "unknown";
+}
+
+/** Discriminate the two live-wait kinds sharing this registry. */
+function isLiveFileWait(w: LiveWait | LiveFileWait): w is LiveFileWait {
+  return "markerRe" in w;
+}
+
+/** First line matching the marker regex — the reported matched line. */
+function matchLine(re: RegExp, content: string): string | undefined {
+  for (const line of content.split(/\r?\n/)) if (re.test(line)) return line;
+  return undefined;
+}
+
+/**
+ * Compile the marker regex with the "m" flag so ^/$ anchor per line;
+ * flags are OURS, so a user "g" (the lastIndex footgun) can never
+ * sneak in. An invalid source fails the start call immediately.
+ */
+function compileMarkerRe(marker: string): RegExp {
+  try {
+    return new RegExp(marker, "m");
+  } catch (err) {
+    throw new Error(
+      `fileWaitStart: marker ${JSON.stringify(marker)} is not a valid regular expression: ${errorMessage(err)}`,
+    );
+  }
+}
+
+/**
+ * The report file must exist and be a regular file at start — an
+ * honest immediate error beats a wait that can only ever time out.
+ */
+async function statReportFile(path: string): Promise<Stats> {
+  let st: Awaited<ReturnType<typeof stat>>;
+  try {
+    st = await stat(path);
+  } catch {
+    throw new Error(
+      `fileWaitStart: path ${JSON.stringify(path)} does not exist (report files must exist before the watch starts)`,
+    );
+  }
+  if (!st.isFile())
+    throw new Error(
+      `fileWaitStart: path ${JSON.stringify(path)} is not a regular file`,
+    );
+  return st;
+}
+
+/** The pending record plus the watch's comparison state, pre-poller. */
+function liveFileWait(
+  markerRe: RegExp,
+  st: Stats,
+  input: {
+    path: string;
+    marker: string;
+    stabilityMs: number;
+    timeoutMs: number;
+  },
+): LiveFileWait {
+  return {
+    record: fileWaitRecordSchema.parse({
+      wait_id: `wait_${randomUUID()}`,
+      target: input.path,
+      marker: input.marker,
+      stability_ms: input.stabilityMs,
+      timeout_ms: input.timeoutMs,
+      state: "pending",
+      started_ms: Date.now(),
+    }),
+    markerRe,
+    baseline: `${st.mtimeMs}:${st.size}`,
+    // Credit pre-existing quietness via the file's own mtime (an
+    // already-finished report fires at once); a skewed future mtime
+    // collapses to now, degrading gracefully to the full window.
+    lastChange: Math.min(Date.now(), st.mtimeMs),
+  };
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/** A watch that can no longer observe its file dies as "failed", never pending. */
+function ioFailureReason(action: string, path: string, err: unknown): string {
+  const code = (err as NodeJS.ErrnoException | null)?.code;
+  if (code === "ENOENT")
+    return `file ${JSON.stringify(path)} was deleted while the wait was pending`;
+  return `${action} on ${JSON.stringify(path)} failed: ${code ?? errorMessage(err)}`;
 }
 
 export function createWaitRegistry(opts: WaitRegistryOpts = {}): WaitRegistry {

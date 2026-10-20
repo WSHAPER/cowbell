@@ -87,13 +87,12 @@ Add to your MCP client config:
 
 ### Waits (session-owned)
 
-<!-- [lane-anchor:report-wait-readme] feat/report-wait: replace with the file_wait tool row(s) -->
-
-| Tool          | Description                                                              |
-| ------------- | ------------------------------------------------------------------------ |
-| `wait_start`  | Non-blocking wait until a status; returns `{wait_id}` (timeout REQUIRED) |
-| `wait_status` | One (`wait_id`) or all waits owned by THIS cowbell process               |
-| `wait_cancel` | Cancel one (`wait_id`) or all owned waits                                |
+| Tool              | Description                                                                        |
+| ----------------- | ---------------------------------------------------------------------------------- |
+| `wait_start`      | Non-blocking wait until a status; returns `{wait_id}` (timeout REQUIRED)           |
+| `file_wait_start` | Non-blocking report-marker watch: file matches a regex AND is quiet `stability_ms` |
+| `wait_status`     | One (`wait_id`) or all waits owned by THIS cowbell process                         |
+| `wait_cancel`     | Cancel one (`wait_id`) or all owned waits                                          |
 
 Every herdr-backed tool accepts optional `machine` or `remote` parameters (mutually exclusive). Without them, commands run against your local herdr session. Remote workspaces and agents are invisible in the local UI, so callers opt in per call. Exceptions: `models_list` (local opencode API) and the wait tools (local herdr events socket) take no transport params, and neither do the machine tools; the saved SSH-machine registry lives in the local herdr client by construction.
 
