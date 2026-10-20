@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import * as worktrees from "../../herdr/spec-worktree.js";
-import { withT, transport, text, exec } from "../shared.js";
+import { withT, transport, text, exec } from "../glue.js";
 import type { TransportParams } from "../shared.js";
 
 export function registerWorktreeTools(server: McpServer): void {

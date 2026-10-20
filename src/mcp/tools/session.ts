@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import * as sessions from "../../herdr/spec-session.js";
-import { withT, transport, text, exec } from "../shared.js";
+import { withT, transport, text, exec } from "../glue.js";
 import type { TransportParams } from "../shared.js";
 
 /**

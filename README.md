@@ -70,20 +70,19 @@ Add to your MCP client config:
 
 ### Agents
 
-<!-- [lane-anchor:agent-health-readme] feat/agent-health: replace with the agent_health tool row -->
-
-| Tool             | Description                                                  |
-| ---------------- | ------------------------------------------------------------ |
-| `agent_list`     | List recognized agents                                       |
-| `agent_get`      | Show one agent                                               |
-| `agent_read`     | Read agent terminal output (pane view)                       |
-| `agent_messages` | Read an agent's structured transcript (channel-labeled)      |
-| `agent_prompt`   | Submit a prompt (types + Enter; `deliver_when: now \| idle`) |
-| `agent_wait`     | Block until a status                                         |
-| `agent_start`    | Start an agent in an existing pane (`model` or `args`)       |
-| `agent_focus`    | Focus an agent pane                                          |
-| `agent_rename`   | Rename an agent                                              |
-| `models_list`    | List local opencode models, default marked (discovery)       |
+| Tool             | Description                                                                         |
+| ---------------- | ----------------------------------------------------------------------------------- |
+| `agent_list`     | List recognized agents                                                              |
+| `agent_get`      | Show one agent                                                                      |
+| `agent_read`     | Read agent terminal output (pane view)                                              |
+| `agent_messages` | Read an agent's structured transcript (channel-labeled)                             |
+| `agent_health`   | One verdict: process liveness + state (blind spots flagged) + transcript error tail |
+| `agent_prompt`   | Submit a prompt (types + Enter; `deliver_when: now \| idle`)                        |
+| `agent_wait`     | Block until a status                                                                |
+| `agent_start`    | Start an agent in an existing pane (`model` or `args`)                              |
+| `agent_focus`    | Focus an agent pane                                                                 |
+| `agent_rename`   | Rename an agent                                                                     |
+| `models_list`    | List local opencode models, default marked (discovery)                              |
 
 ### Waits (session-owned)
 

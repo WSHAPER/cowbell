@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { fetchModels } from "../../opencode/client.js";
-import { json } from "../shared.js";
+import { json } from "../glue.js";
 
 /**
  * Model discovery for agent_start's `model` param — the read-only

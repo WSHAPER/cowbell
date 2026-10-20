@@ -1,14 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import * as agents from "../../herdr/spec-agent.js";
-import {
-  withT,
-  transport,
-  text,
-  exec,
-  target,
-  agentStartShape,
-} from "../shared.js";
+import { withT, transport, text, exec } from "../glue.js";
+import { target, agentStartShape } from "../shared.js";
 import type { StartParams, TargetParams, RenameParams } from "../shared.js";
 
 export function registerAgentControlTools(server: McpServer): void {

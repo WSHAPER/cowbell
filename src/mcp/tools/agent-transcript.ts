@@ -1,7 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { agentMessages } from "../../herdr/messages.js";
-import { withT, transport, json, target } from "../shared.js";
+import { withT, transport, json } from "../glue.js";
+import { target } from "../shared.js";
 import type { MessagesParams } from "../shared.js";
 
 /**

@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import * as machines from "../../herdr/spec-machine.js";
-import { text, exec } from "../shared.js";
+import { text, exec } from "../glue.js";
 
 /**
  * The saved SSH-machine registry — LOCAL by construction, so NO

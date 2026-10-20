@@ -1,14 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import * as panes from "../../herdr/spec-pane.js";
-import {
-  withT,
-  transport,
-  text,
-  exec,
-  paneId,
-  readSourceSchema,
-} from "../shared.js";
+import { withT, transport, text, exec } from "../glue.js";
+import { paneId, readSourceSchema } from "../shared.js";
 import type {
   PaneParams,
   ReadPaneParams,

@@ -1,50 +1,15 @@
 import { z } from "zod";
-import { runHerdr } from "../herdr/exec.js";
 import { AGENT_KINDS, AGENT_STATUSES } from "../herdr/spec-agent.js";
 import type {
   AgentKind,
   AgentStatus,
   PromptDelivery,
 } from "../herdr/spec-agent.js";
-import type { PaneSource, Spec } from "../herdr/spec.js";
-import { withTransport, type Transport } from "../herdr/transport-args.js";
-import {
-  TransportSchema,
-  toTransport,
-  type TransportParams,
-} from "./transport.js";
-
-const machine = z
-  .string()
-  .optional()
-  .describe("Registered machine label/id — run there instead of local");
-const remote = z
-  .string()
-  .optional()
-  .describe("SSH target — run on a remote herdr session instead of local");
+import type { PaneSource } from "../herdr/spec.js";
+import { withT } from "./glue.js";
+import type { TransportParams } from "./transport.js";
 
 export type { TransportParams } from "./transport.js";
-
-/** Merge transport params into a shape and derive the parsed transport. */
-export const withT = <S extends z.ZodRawShape>(shape: S) => ({
-  ...shape,
-  machine,
-  remote,
-});
-export const transport = (v: {
-  machine?: string;
-  remote?: string;
-}): Transport | undefined =>
-  toTransport(
-    TransportSchema.parse({ machine: v.machine, remote: v.remote }) ??
-      undefined,
-  );
-
-export const text = (t: string) => ({
-  content: [{ type: "text" as const, text: t }],
-});
-export const exec = (s: Spec, t?: Transport) => runHerdr(withTransport(s, t));
-export const json = (v: unknown) => text(JSON.stringify(v, null, 2));
 
 export const paneId = z.string().describe("Pane id, e.g. w36:p1");
 export const target = z.string().describe("Agent name or hosting pane id");
@@ -172,6 +137,53 @@ export type WaitStartParams = {
 };
 export type WaitStatusParams = { wait_id?: string };
 export type WaitCancelParams = { wait_id?: string; all?: boolean };
+
+/**
+ * file_wait_start's REGISTERED input shape — the report-marker watch.
+ * No transport params, like the rest of the wait family: the watched
+ * file is read by THIS process, on THIS machine, by construction.
+ * min_bytes is deliberately absent: marker + quiet-window subsumes it
+ * (a below-threshold file that goes quiet with the marker present
+ * SHOULD fire — the writer finished), so the knob would only add a
+ * way to be wrong.
+ */
+export const fileWaitStartShape = {
+  path: z
+    .string()
+    .min(1)
+    .describe(
+      "Absolute path to the report file — it must already exist; a missing path fails the call immediately",
+    ),
+  marker: z
+    .string()
+    .min(1)
+    .describe(
+      "Regular expression (source string, compiled with the m flag so ^/$ anchor per line) tested " +
+        "against each line — regex over literal strings for heading-drift tolerance, e.g. " +
+        "'^#{1,6}\\\\s*[Ss]tatus.*\\\\bdone\\\\b' survives '## Residual candidates' style drift",
+    ),
+  stability_ms: z
+    .number()
+    .int()
+    .positive()
+    .describe(
+      "REQUIRED quiet window: the file's mtime+size must be unchanged for this long before the wait " +
+        "fires — the cure for progressively-written reports firing early on a partial marker",
+    ),
+  timeout_ms: z
+    .number()
+    .int()
+    .positive()
+    .describe(
+      "REQUIRED client-side deadline in ms — the wait is abandoned as timed_out when it passes",
+    ),
+};
+export type FileWaitStartParams = {
+  path: string;
+  marker: string;
+  stability_ms: number;
+  timeout_ms: number;
+};
 
 export type StartParams = TransportParams & {
   name: string;

@@ -1,14 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import * as agents from "../../herdr/spec-agent.js";
-import {
-  withT,
-  transport,
-  text,
-  exec,
-  target,
-  deliverWhenSchema,
-} from "../shared.js";
+import { withT, transport, text, exec } from "../glue.js";
+import { target, deliverWhenSchema } from "../shared.js";
 import type { PromptParams, WaitParams } from "../shared.js";
 
 export function registerAgentPromptTools(server: McpServer): void {
