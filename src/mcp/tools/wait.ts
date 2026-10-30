@@ -2,12 +2,17 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { WaitRegistry } from "../../herdr/waits.js";
 import { json } from "../glue.js";
-import { waitStartShape, fileWaitStartShape } from "../shared.js";
+import {
+  waitStartShape,
+  fileWaitStartShape,
+  waitNextShape,
+} from "../shared.js";
 import type {
   WaitStartParams,
   WaitStatusParams,
   WaitCancelParams,
   FileWaitStartParams,
+  WaitNextParams,
 } from "../shared.js";
 
 /**
@@ -59,6 +64,24 @@ export function registerWaitTools(
           v.timeout_ms,
         ),
       ),
+  );
+  server.tool(
+    "wait_next",
+    "BLOCK until at least one wait owned by THIS cowbell process reaches a terminal state (fired | " +
+      "timed_out | failed), then return the batch — the completion NOTIFICATION channel for wait_start/" +
+      "file_wait_start. MCP servers cannot push into an opencode session (server->client notifications are " +
+      "dropped; anomalyco/opencode#48855), so THIS TOOL RESULT IS THE WAKE-UP: park one call instead of " +
+      "polling wait_status or spawning background `herdr agent wait` shells. Returns immediately when " +
+      "terminal events are already undelivered, or with {events: [], pending: 0} when no waits are pending " +
+      "(nothing can ever fire). Parking is event-driven (zero wake-ups between transitions); timeout_ms is " +
+      "REQUIRED and bounds only THIS call — expiry returns {events: [], pending: N, timed_out: true}, the " +
+      "cue to call again. Events (full wait records, either kind) are DRAINED — each terminal record is " +
+      "delivered to exactly one wait_next call; wait_status remains the full-state view. wait_cancel emits " +
+      "nothing (cancelled waits are simply forgotten). opencode holds tool calls open for up to 12h " +
+      "(execution timeout), so a long park is safe. Session-owned like every wait: machine/remote do not " +
+      "apply.",
+    waitNextShape,
+    async (v: WaitNextParams) => json(await waits.waitNext(v.timeout_ms)),
   );
   registerWaitQueryTools(server, waits);
 }

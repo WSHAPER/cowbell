@@ -139,6 +139,23 @@ export type WaitStatusParams = { wait_id?: string };
 export type WaitCancelParams = { wait_id?: string; all?: boolean };
 
 /**
+ * wait_next's REGISTERED input shape — just the REQUIRED park
+ * deadline. No transport params, like the rest of the wait family:
+ * the drained registry is THIS process's, locally.
+ */
+export const waitNextShape = {
+  timeout_ms: z
+    .number()
+    .int()
+    .positive()
+    .describe(
+      "REQUIRED deadline for THIS blocking call in ms — on expiry with nothing terminal it returns " +
+        "{events: [], timed_out: true} (call again to keep waiting); it does NOT touch any wait's own timeout",
+    ),
+};
+export type WaitNextParams = { timeout_ms: number };
+
+/**
  * file_wait_start's REGISTERED input shape — the report-marker watch.
  * No transport params, like the rest of the wait family: the watched
  * file is read by THIS process, on THIS machine, by construction.

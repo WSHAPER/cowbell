@@ -98,5 +98,19 @@ describe.skipIf(!hasHerdr || !ownPane || !ownStatus)(
       expect(all.waits.map((w) => w.wait_id)).toEqual([fired.wait_id]);
       expect(all.waits[0]!.state).toBe("fired");
     });
+
+    it("wait_next drains the immediate own-pane fire through the real socket", async () => {
+      const waits = createWaitRegistry();
+      const fired = await waits.waitStart(ownPane!, [ownStatus!], 5_000);
+      // The terminal record is buffered; wait_next must hand it over
+      // WITHOUT parking (timed_out stays false) — the notification
+      // leg of the family against real herdr.
+      const out = await waits.waitNext(5_000);
+      expect(out).toEqual({
+        events: [fired],
+        pending: 0,
+        timed_out: false,
+      });
+    });
   },
 );

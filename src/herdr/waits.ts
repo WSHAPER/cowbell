@@ -47,6 +47,19 @@ import {
  * (e.g. minimal-interface model spawns). A watched file that
  * disappears mid-wait fails the wait (state "failed" + reason) rather
  * than rotting in pending.
+ *
+ * COMPLETION NOTIFICATION (wait_next): every terminal transition —
+ * fired, timed_out, failed, either kind — is also pushed onto an
+ * in-registry terminal-event queue that wakes a parked wait_next
+ * call. MCP push notifications never reach an opencode session
+ * (anomalyco/opencode#48855: every server->client notification except
+ * logging/list_changed is dropped, and logging only hits the logger),
+ * so the tool RESULT is the notification: the orchestrator blocks on
+ * ONE wait_next call instead of N flaky background `herdr agent wait`
+ * shells. The queue is the same in-memory, process-scoped store as
+ * the rest of the registry — it dies with the process, is invisible
+ * cross-session, and cancels emit nothing (cancelled waits are
+ * "simply forgotten", per wait_cancel's contract).
  */
 
 /**
@@ -94,6 +107,26 @@ export type StatusWaitRecord = z.output<typeof waitRecordSchema>;
 export type FileWaitRecord = z.output<typeof fileWaitRecordSchema>;
 /** Either kind — one registry, one id namespace, intermixed in wait_status. */
 export type WaitRecord = StatusWaitRecord | FileWaitRecord;
+
+/**
+ * wait_next's result contract: the drained batch of terminal records
+ * (events), how many owned waits are still pending, and whether THIS
+ * call's own deadline expired with nothing terminal (the caller's cue
+ * to call again to keep waiting).
+ */
+export const waitNextResultSchema = z
+  .object({
+    events: z.array(z.union([waitRecordSchema, fileWaitRecordSchema])),
+    pending: z.number().int().nonnegative(),
+    timed_out: z.boolean(),
+  })
+  .strict();
+export type WaitNextResult = z.output<typeof waitNextResultSchema>;
+
+/** Discriminate a terminal record's kind for wait_next events. */
+export function waitKind(record: WaitRecord): "status" | "file" {
+  return "marker" in record ? "file" : "status";
+}
 
 /** Backoff between resubscribe attempts (ms), capped at the last step. */
 const RESUBSCRIBE_BACKOFF_MS = [0, 100, 200, 400, 800, 1600, 2000];
@@ -163,6 +196,10 @@ export class WaitRegistry {
   private readonly waits = new Map<string, LiveWait>();
   private readonly fileWaits = new Map<string, LiveFileWait>();
   private readonly pathWatches = new Map<string, PathWatch>();
+  /** Terminal records not yet delivered to a wait_next caller. */
+  private readonly terminalEvents: WaitRecord[] = [];
+  /** Parked wait_next callers, FIFO — each wake drains the queue. */
+  private readonly parkedNext: Array<() => void> = [];
 
   constructor(private readonly opts: WaitRegistryOpts = {}) {}
 
@@ -327,6 +364,76 @@ export class WaitRegistry {
   }
 
   /**
+   * BLOCK until a terminal event is deliverable, then hand over the
+   * whole drained batch. The completion-notification half of the
+   * family: an orchestrator parks ONE call here instead of polling
+   * wait_status or spawning `herdr agent wait` shells.
+   *
+   *   - buffered terminal events  -> returned immediately (drained)
+   *   - nothing pending at all    -> {events: [], pending: 0} at once
+   *     (no wait can ever fire; parking would be a lie)
+   *   - otherwise park until any wait terminates, or timeout_ms
+   *     expires -> {events: [], pending: N, timed_out: true} — the
+   *     caller's cue to call again and keep waiting
+   *
+   * Parking is event-driven: the resolve fires from emitTerminal, so
+   * there is zero wake-up work between terminal transitions. A batch
+   * racing the deadline resolves in the batch's favor (timed_out
+   * stays false when events arrived).
+   */
+  async waitNext(timeoutMs: number): Promise<WaitNextResult> {
+    timeoutMs = parseOrThrow("waitNext", sc.timeoutMs, timeoutMs);
+    if (this.terminalEvents.length > 0) return this.drainNext(false);
+    if (this.pendingCount() === 0)
+      return waitNextResultSchema.parse({
+        events: [],
+        pending: 0,
+        timed_out: false,
+      });
+    const woke = await new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => resolve(false), timeoutMs);
+      this.parkedNext.push(() => {
+        clearTimeout(timer);
+        resolve(true);
+      });
+    });
+    return this.drainNext(!woke);
+  }
+
+  /** Owned waits still in state pending, either kind. */
+  private pendingCount(): number {
+    let n = 0;
+    for (const w of this.waits.values())
+      if (w.record.state === "pending") n += 1;
+    for (const w of this.fileWaits.values())
+      if (w.record.state === "pending") n += 1;
+    return n;
+  }
+
+  /** Snapshot + clear the queue. Events are delivered exactly once. */
+  private drainNext(timedOut: boolean): WaitNextResult {
+    const events = this.terminalEvents.splice(0);
+    return waitNextResultSchema.parse({
+      events,
+      pending: this.pendingCount(),
+      timed_out: timedOut && events.length === 0,
+    });
+  }
+
+  /**
+   * The single notification seam: record a terminal transition and
+   * wake the first parked wait_next caller, who drains the queue
+   * itself (never a handoff — events landing between wake and drain
+   * ride along in the same batch). When opencode grows real push
+   * (issue #48855), this is where a sendNotification would fan out
+   * from — no API change needed.
+   */
+  private emitTerminal(record: WaitRecord): void {
+    this.terminalEvents.push(record);
+    this.parkedNext.shift()?.();
+  }
+
+  /**
    * Resolve a target (name or hosting pane id) against the live agent
    * list. Unknown targets fail the wait_start call itself — an honest
    * immediate error beats a wait that can only ever time out.
@@ -417,6 +524,7 @@ export class WaitRegistry {
     if (wait.record.state !== "pending") return;
     wait.record = { ...wait.record, state, result };
     this.teardown(wait);
+    this.emitTerminal(wait.record);
   }
 
   /** Terminal teardown: stream AND deadline timer. */
@@ -579,6 +687,7 @@ export class WaitRegistry {
     if (wait.record.state !== "pending") return;
     wait.record = { ...wait.record, state, result, reason };
     this.fileTeardown(wait);
+    this.emitTerminal(wait.record);
   }
 
   /** Terminal teardown: deadline timer AND poller membership. */
