@@ -1,0 +1,42 @@
+#!/bin/sh
+# cowbell post-commit — the deploy-chain trigger (chain: scripts/deploy.sh).
+# Gated fire-and-forget; NEVER blocks or fails the commit it follows.
+#
+# Gates, in order (any miss = silent exit 0):
+#   1. opt-out: COWBELL_DEPLOY=off in the environment
+#   2. existence: scripts/deploy.sh must be executable — the hook lands
+#      BEFORE the chain script (phase-2 pre-registration) and must be a
+#      no-op until then
+#   3. branch: only commits ON MAIN deploy. Fleet worktrees commit feature
+#      branches; their work fires this hook only after it merges to main.
+#      (hooksPath is repo-shared and .githooks is tracked, so linked
+#      worktrees run this hook too — this gate is what keeps them quiet.)
+#   4. trigger: the commit must touch the BUILT surface — src/**,
+#      package.json, package-lock.json (tsconfig.build.json compiles all
+#      of src into the deployed dist; nothing else can change the tools).
+#      diff HEAD^1..HEAD is uniform for normal AND merge commits (a merge
+#      diff vs first parent = everything it landed — the deploy event).
+#
+# One-time activation per clone: npm run hooks:install
+# (= git config core.hooksPath .githooks; relative, so worktrees resolve
+# their own tracked copy).
+set -u
+
+[ "${COWBELL_DEPLOY:-}" = "off" ] && exit 0
+
+ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+[ -x "$ROOT/scripts/deploy.sh" ] || exit 0
+
+[ "$(git branch --show-current)" = "main" ] || exit 0
+
+PARENT=$(git rev-parse -q --verify 'HEAD^1' 2>/dev/null) || exit 0
+git diff --name-only "$PARENT" HEAD 2>/dev/null \
+  | grep -qE '^(src/|package\.json$|package-lock\.json$)' || exit 0
+
+# The chain pushes main, syncs + rebuilds the terminal-config/cowbell
+# deploy copy, bumps the parent gitlink, and prints the reload hint. It
+# refuses loudly on any guard failure (dirty parent, locks, missing dirs)
+# and can never mask this commit. Env scrubbed so parent-side git calls
+# see no hook-injected GIT_* variables.
+exec env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE -u GIT_PREFIX \
+  "$ROOT/scripts/deploy.sh" --from-hook
