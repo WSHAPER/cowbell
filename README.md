@@ -296,6 +296,14 @@ npm run e2e:wait-own-pane -- /tmp/evidence.json   # own-pane wait-until-idle liv
 npm run bench          # e2e + hyperfine
 ```
 
+## Deploy: the terminal-config submodule chain
+
+The live cowbell MCP server runs from the `dist/` build inside the terminal-config checkout (`terminal-config/cowbell/dist/bin/stdio.js`), pinned by a submodule gitlink — and `dist/` is gitignored, so the pointer alone deploys nothing. Landing a tool-surface commit on `main` therefore chains to that deploy copy: the `.githooks/post-commit` hook runs `scripts/deploy.sh`, which pushes dev `main`, fast-forwards the `terminal-config/cowbell` submodule to `origin/main`, rebuilds `dist/` with the same incantation agent-config's installer uses, and records a single-purpose `bump cowbell (<sha>: <subject>, +N)` gitlink commit in terminal-config, then pushes the parent.
+
+One-time activation per clone: `npm run hooks:install` (sets `core.hooksPath` to the tracked `.githooks/`; the relative path means linked worktrees resolve their own copy whenever their branch carries it). Opt out with `COWBELL_DEPLOY=off` in the environment. The hook fires only for commits on `main` that touch the built surface (`src/**`, `package.json`, `package-lock.json`); fleet-worktree commits stay quiet until they land on `main`. `npm run deploy` runs the same chain on demand, and `scripts/deploy.sh --dry-run` prints the resolved plan without touching anything.
+
+`npm run deploy:reload` reconnects the cowbell MCP server in every open opencode location (a single `experimental.mcp.connect` is a stop+start under the server lock — the fresh process re-fetches the tool list, and running sessions re-read tools on their next step). It is deliberately NOT part of the commit hook: a reconnect kills any in-flight cowbell tool call, which mid-fleet-wave is exactly the wrong moment.
+
 ## License
 
 [MIT](LICENSE)

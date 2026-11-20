@@ -9,6 +9,7 @@ npm run reference:update      # pull upstream herdr source
 npm run reference:surface     # re-capture the --help fixture
 npm test                      # drift suite names any breakage
 npm run e2e                   # real loop vs the live session
+npm run deploy           # tool-surface commit landed? chain it to the terminal-config submodule (hook does this automatically on main)
 ```
 
 ## When the drift suite fails
