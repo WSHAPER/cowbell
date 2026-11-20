@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import type { Spec } from "../src/herdr/spec.js";
 import { agentStart } from "../src/herdr/spec-agent.js";
-import type { StartParams } from "../src/mcp/shared.js";
+import type { StartParams, ReminderStartParams } from "../src/mcp/shared.js";
 
 /**
  * F1 regression: the agent_start MCP schema must declare `args` — the
@@ -205,5 +205,85 @@ describe("MCP schema layer: wait_next declares a REQUIRED bounded park", () => {
     );
     expect(block).toContain("waitNextShape");
     expect(block).not.toContain("withT");
+  });
+});
+
+/**
+ * reminder_start — the wave's frozen contract, pinned BEFORE the
+ * fleet lands (phase-2 pre-registration): text is REQUIRED (a
+ * reminder without a payload is a no-op timer), the scheduling keys
+ * are one-of in_ms|at_ms at the registry layer, recurring has a
+ * 1-minute floor, and NO transport params (the injection rides the
+ * local opencode background service). The registration must use the
+ * shared exported shape, not an inline replica (the F1 lesson), and
+ * the server must wire the injection seam at the composition root.
+ */
+describe("MCP schema layer: reminder_start declares the frozen reminder contract", () => {
+  it("text is REQUIRED; scheduling keys optional; no transport params", async () => {
+    const { reminderStartShape } = await import("../src/mcp/shared.js");
+    const schema = z.object(reminderStartShape);
+    expect(() => schema.parse({})).toThrow(); // text REQUIRED
+    expect(
+      schema.parse({ text: "check wait_status", in_ms: 60_000 }),
+    ).toMatchObject({ text: "check wait_status", in_ms: 60_000 });
+    expect(() => schema.parse({ text: "x", every_ms: 30_000 })).toThrow(); // recurring floor: 1 minute
+    expect(Object.keys(reminderStartShape)).not.toContain("machine");
+    expect(Object.keys(reminderStartShape)).not.toContain("remote");
+  });
+
+  it("z.infer linkage: the registered shape AND ReminderStartParams agree", async () => {
+    const { reminderStartShape } = await import("../src/mcp/shared.js");
+    type FromSchema = z.infer<z.ZodObject<typeof reminderStartShape>>;
+    // Each cross-assignment fails `npm run typecheck` when a side
+    // drops or renames the key — the F1 model twin pattern.
+    const text: FromSchema["text"] = "x";
+    const paramsText: ReminderStartParams["text"] = text;
+    const delivery: NonNullable<FromSchema["delivery"]> = "steer";
+    const paramsDelivery: NonNullable<ReminderStartParams["delivery"]> =
+      delivery;
+    expect([paramsText, paramsDelivery]).toEqual(["x", "steer"]);
+    // Runtime mirror of the compile pin (the agent_start precedent).
+    expect(Object.keys(reminderStartShape)).toContain("delivery");
+    expect(Object.keys(reminderStartShape)).toContain("session_id");
+  });
+
+  it("reminder.ts registers reminder_start via the shared shape; server wires the seam", async () => {
+    const fs = await import("node:fs");
+    const src = fs.readFileSync(
+      new URL("../src/mcp/tools/reminder.ts", import.meta.url),
+      "utf8",
+    );
+    const block = src.slice(src.indexOf('"reminder_start"'));
+    expect(block).toContain("reminderStartShape");
+    expect(block).not.toContain("withT");
+    const serverSrc = fs.readFileSync(
+      new URL("../src/mcp/server.ts", import.meta.url),
+      "utf8",
+    );
+    expect(serverSrc).toContain("registerReminderTools(server, waits)");
+    expect(serverSrc.indexOf("registerReminderTools")).toBeGreaterThan(
+      serverSrc.indexOf("registerWaitTools"),
+    );
+  });
+
+  it("the reminder record contract is the shipped literal (phase-2 pin)", async () => {
+    const { reminderRecordSchema } = await import("../src/herdr/waits.js");
+    const sample = {
+      wait_id: "wait_x",
+      kind: "reminder",
+      target: "ses_example",
+      text: "check wait_status",
+      delivery: "steer",
+      fire_at_ms: 1,
+      until_ms: 2,
+      state: "pending",
+      fired_count: 0,
+      started_ms: 0,
+    };
+    expect(reminderRecordSchema.parse(sample)).toEqual(sample);
+    expect(() =>
+      reminderRecordSchema.parse({ ...sample, kind: "status" }),
+    ).toThrow(); // kind is the literal discriminator
+    expect(() => reminderRecordSchema.parse({ ...sample, extra: 1 })).toThrow(); // strict: no undeclared keys
   });
 });

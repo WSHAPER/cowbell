@@ -90,3 +90,38 @@ export function modelDefault(): ApiSpec {
     surface: "opencode model.default",
   };
 }
+
+/** How a fire-time prompt lands in the target session. */
+export type PromptDelivery = "steer" | "queue";
+
+const promptDelivery = z.enum(["steer", "queue"]);
+
+/**
+ * Inject a prompt into a session (operation `session.prompt`, POST
+ * /api/session/{sessionID}/prompt). `delivery` defaults to "steer":
+ * the message STARTS a turn on an idle session and STEERS the
+ * in-flight turn of a busy one — the wake-up semantic reminders fire
+ * on ("queue" would wait out the turn instead, useless as a wakeup).
+ * The body rides as --data JSON; this is the repo's first POST.
+ */
+export function sessionPrompt(
+  session: string,
+  text: string,
+  delivery: PromptDelivery = "steer",
+): ApiSpec {
+  session = v("sessionPrompt", sessionId, session);
+  text = v("sessionPrompt", z.string().min(1), text);
+  delivery = v("sessionPrompt", promptDelivery, delivery);
+  return {
+    argv: [
+      "opencode",
+      "api",
+      "session.prompt",
+      "--param",
+      `sessionID=${session}`,
+      "--data",
+      JSON.stringify({ text, delivery }),
+    ],
+    surface: "opencode session.prompt",
+  };
+}

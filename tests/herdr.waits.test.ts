@@ -101,7 +101,9 @@ describe("wait registry: event-driven fire", () => {
     mock.pushStatusEvent("w1:p1", "idle");
     await vi.waitFor(() => expect(one(reg, rec.wait_id).state).toBe("fired"));
     expect(contract(one(reg, rec.wait_id))).toBe("fired");
-    expect(one(reg, rec.wait_id).result).toBe("idle");
+    const fired = one(reg, rec.wait_id);
+    if (!("until" in fired)) throw new Error("expected a status wait");
+    expect(fired.result).toBe("idle");
   });
 
   it("ignores events for other panes and non-matching statuses", async () => {
@@ -127,7 +129,9 @@ describe("wait registry: timeout and cancel", () => {
     await vi.waitFor(() =>
       expect(contract(one(reg, rec.wait_id))).toBe("timed_out"),
     );
-    expect(one(reg, rec.wait_id).result).toBeUndefined();
+    const timedOut = one(reg, rec.wait_id);
+    if (!("until" in timedOut)) throw new Error("expected a status wait");
+    expect(timedOut.result).toBeUndefined();
     await vi.waitFor(() => expect(mock.liveSubscriptions()).toBe(0));
   });
 
@@ -168,7 +172,9 @@ describe("wait registry: events_lost and stream death", () => {
     mock.emitEventsLost();
     await vi.waitFor(() => expect(one(reg, rec.wait_id).state).toBe("fired"));
 
-    expect(one(reg, rec.wait_id).result).toBe("idle");
+    const fired = one(reg, rec.wait_id);
+    if (!("until" in fired)) throw new Error("expected a status wait");
+    expect(fired.result).toBe("idle");
     expect(mock.subscribes).toBeGreaterThanOrEqual(2);
     expect(mock.agentListRequests).toBeGreaterThan(readsBefore);
     // The fire came from the authoritative read, not a replayed event.

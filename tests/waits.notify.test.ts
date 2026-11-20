@@ -115,7 +115,9 @@ describe("wait_next: park and wake", () => {
       pending: 0,
       timed_out: false,
     });
-    expect(out.events[0]!.result).toBe("idle");
+    const first = out.events[0]!;
+    if (!("until" in first)) throw new Error("expected a status wait record");
+    expect(first.result).toBe("idle");
   });
 
   it("wakes when a wait TIMES OUT (terminal, not just fired)", async () => {

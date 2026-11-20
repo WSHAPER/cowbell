@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { injectPrompt } from "../opencode/client.js";
 import { createWaitRegistry } from "../herdr/waits.js";
 import { registerWorkspaceTools } from "./tools/workspace.js";
 import { registerWorktreeTools } from "./tools/worktree.js";
@@ -10,6 +11,7 @@ import { registerModelTools } from "./tools/models.js";
 import { registerAgentPromptTools } from "./tools/agent-prompt.js";
 import { registerAgentControlTools } from "./tools/agent-control.js";
 import { registerWaitTools } from "./tools/wait.js";
+import { registerReminderTools } from "./tools/reminder.js";
 import { registerAgentHealthTools } from "./tools/agent-health.js";
 import { registerMachineTools } from "./tools/machine.js";
 import { registerSessionTools } from "./tools/session.js";
@@ -32,6 +34,12 @@ import { registerTabTools } from "./tools/tab.js";
 
 function buildServer(): McpServer {
   const server = new McpServer({ name: "cowbell", version: "0.1.0" });
+  // The reminder fire action is injected HERE (not imported inside
+  // waits.ts): the registry stays a pure state machine, tests pass a
+  // recorder, and the opencode process boundary stays in client.ts.
+  const waits = createWaitRegistry({
+    inject: (session, text, opts) => injectPrompt(session, text, opts),
+  });
   registerWorkspaceTools(server);
   registerWorktreeTools(server);
   registerPaneTools(server);
@@ -40,7 +48,8 @@ function buildServer(): McpServer {
   registerModelTools(server);
   registerAgentPromptTools(server);
   registerAgentControlTools(server);
-  registerWaitTools(server, createWaitRegistry());
+  registerWaitTools(server, waits);
+  registerReminderTools(server, waits);
   registerMachineTools(server);
   registerSessionTools(server);
   registerTabTools(server);

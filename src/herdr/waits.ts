@@ -3,6 +3,7 @@ import type { Stats } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { z } from "zod";
 import { parseOrThrow } from "../parse.js";
+import { sessionId } from "../opencode/spec.js";
 import { parseAgentListResult, type AgentEntry } from "./outputs.js";
 import * as sc from "./schemas.js";
 import { AGENT_STATUSES, type AgentStatus } from "./schemas.js";
@@ -48,6 +49,19 @@ import {
  * disappears mid-wait fails the wait (state "failed" + reason) rather
  * than rotting in pending.
  *
+ * SCHEDULED REMINDERS (reminder_start): the registry's third kind.
+ * No MCP push channel reaches an opencode session (the wait_next
+ * research verdict), so a reminder's terminal ACT is an injection:
+ * at the scheduled time the registry calls the opencode session.prompt
+ * API on the TARGET session (default: the calling session, resolved
+ * from the request's ai.opencode/sessionID meta at the MCP layer).
+ * The injected prompt IS the wakeup — it starts a turn on an idle
+ * session (delivery "steer" also lands in a busy one). Same
+ * ownership rules as every wait: in-memory, dies with the process,
+ * surfaced through wait_status/wait_cancel/wait_next with target =
+ * the ses_ session id. A durability tier (opencode automations,
+ * v2.3.1+) is a deliberate follow-up, not a property of this kind.
+ *
  * COMPLETION NOTIFICATION (wait_next): every terminal transition —
  * fired, timed_out, failed, either kind — is also pushed onto an
  * in-registry terminal-event queue that wakes a parked wait_next
@@ -63,8 +77,11 @@ import {
  */
 
 /**
- * "failed" is reachable ONLY by file waits (watched file deleted /
- * unreadable). Status waits keep their exact three-state behavior.
+ * "failed" is reachable by file waits (watched file deleted /
+ * unreadable) and by reminders (the fire-time injection failed after
+ * its bounded retries). Status waits keep their exact three-state
+ * behavior; "timed_out" is unreachable for reminders (their bound is
+ * until_ms, and reaching it is a normal completion, not a timeout).
  */
 export const WAIT_STATES = ["pending", "fired", "timed_out", "failed"] as const;
 export type WaitState = (typeof WAIT_STATES)[number];
@@ -105,8 +122,37 @@ export const fileWaitRecordSchema = z
 type FileWaitResult = z.output<typeof fileWaitResultSchema>;
 export type StatusWaitRecord = z.output<typeof waitRecordSchema>;
 export type FileWaitRecord = z.output<typeof fileWaitRecordSchema>;
-/** Either kind — one registry, one id namespace, intermixed in wait_status. */
-export type WaitRecord = StatusWaitRecord | FileWaitRecord;
+
+/**
+ * The wait_status record contract (reminders — `target` is the ses_
+ * session id the prompt is injected into). `kind` is the explicit
+ * discriminator; fire_at_ms is computed once at start; until_ms is
+ * the hard end bound (default started_ms + 7 days, the Claude Code
+ * scheduled-task expiry precedent); fired_count/last_fired_ms track
+ * recurring fire history.
+ */
+export const reminderRecordSchema = z
+  .object({
+    wait_id: z.string(),
+    kind: z.literal("reminder"),
+    target: z.string(),
+    text: z.string(),
+    delivery: z.enum(["steer", "queue"]),
+    fire_at_ms: z.number().int().nonnegative(),
+    every_ms: z.number().int().positive().optional(),
+    until_ms: z.number().int().nonnegative(),
+    state: z.enum(WAIT_STATES),
+    fired_count: z.number().int().nonnegative(),
+    last_fired_ms: z.number().int().nonnegative().optional(),
+    /** Present only on state "failed" — why the injection died. */
+    reason: z.string().optional(),
+    started_ms: z.number().int().nonnegative(),
+  })
+  .strict();
+export type ReminderRecord = z.output<typeof reminderRecordSchema>;
+
+/** All kinds — one registry, one id namespace, intermixed in wait_status. */
+export type WaitRecord = StatusWaitRecord | FileWaitRecord | ReminderRecord;
 
 /**
  * wait_next's result contract: the drained batch of terminal records
@@ -116,7 +162,9 @@ export type WaitRecord = StatusWaitRecord | FileWaitRecord;
  */
 export const waitNextResultSchema = z
   .object({
-    events: z.array(z.union([waitRecordSchema, fileWaitRecordSchema])),
+    events: z.array(
+      z.union([waitRecordSchema, fileWaitRecordSchema, reminderRecordSchema]),
+    ),
     pending: z.number().int().nonnegative(),
     timed_out: z.boolean(),
   })
@@ -124,12 +172,20 @@ export const waitNextResultSchema = z
 export type WaitNextResult = z.output<typeof waitNextResultSchema>;
 
 /** Discriminate a terminal record's kind for wait_next events. */
-export function waitKind(record: WaitRecord): "status" | "file" {
+export function waitKind(record: WaitRecord): "status" | "file" | "reminder" {
+  if ("kind" in record) return record.kind;
   return "marker" in record ? "file" : "status";
 }
 
 /** Backoff between resubscribe attempts (ms), capped at the last step. */
 const RESUBSCRIBE_BACKOFF_MS = [0, 100, 200, 400, 800, 1600, 2000];
+
+/**
+ * Default reminder end bound: 7 days, the Claude Code session-scoped
+ * scheduled-task expiry precedent — in-memory reminders get a hard
+ * ceiling even though the process would die first anyway.
+ */
+const DEFAULT_REMINDER_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** File-wait poll cadence: clamp(stability_ms / 5) into [50ms, 1s]. */
 const MIN_POLL_MS = 50;
@@ -165,6 +221,18 @@ interface LiveFileWait {
   matchedLine?: string;
 }
 
+/**
+ * A live REMINDER — one armed timer, one terminal fire action (the
+ * session.prompt injection). Phase-2 scaffolding arms ONE-SHOTS only
+ * (every_ms is rejected at start with a pointer to the fleet wave);
+ * the recurring re-arm loop and the bounded retry ladder land with R2.
+ */
+interface LiveReminder {
+  record: ReminderRecord;
+  /** Set EXACTLY ONCE per fire cycle; NOT unref'd (deadline precedent). */
+  timer?: ReturnType<typeof setTimeout>;
+}
+
 /** stat signature + content cache: what one poll tick observes per path. */
 interface PathSnapshot {
   sig: string;
@@ -186,15 +254,34 @@ interface PathWatch {
   cached?: PathSnapshot;
 }
 
+/**
+ * The reminder fire action: inject a prompt into a session via the
+ * opencode session.prompt API. Injected at the composition root (the
+ * real injectPrompt); tests pass a recorder. Returning without
+ * throwing = delivered.
+ */
+export type ReminderInject = (
+  session: string,
+  text: string,
+  opts: { delivery?: "steer" | "queue" },
+) => Promise<unknown>;
+
 export interface WaitRegistryOpts {
   /** Pin every socket call to one path (tests point this at a mock). */
   socketPath?: string;
+  /**
+   * The reminder fire action. REQUIRED for reminder_start: absent ⇒
+   * the call fails honestly at start rather than arming a timer that
+   * can only ever fail at fire time.
+   */
+  inject?: ReminderInject;
 }
 
 /** One registry per process — the ownership boundary itself. */
 export class WaitRegistry {
   private readonly waits = new Map<string, LiveWait>();
   private readonly fileWaits = new Map<string, LiveFileWait>();
+  private readonly reminders = new Map<string, LiveReminder>();
   private readonly pathWatches = new Map<string, PathWatch>();
   /** Terminal records not yet delivered to a wait_next caller. */
   private readonly terminalEvents: WaitRecord[] = [];
@@ -305,17 +392,19 @@ export class WaitRegistry {
     return wait.record;
   }
 
-  /** One wait of either kind (wait_id) or every wait owned by THIS process. */
+  /** One wait of any kind (wait_id) or every wait owned by THIS process. */
   waitStatus(waitId?: string): WaitRecord | { waits: WaitRecord[] } {
     if (waitId === undefined)
       return {
         waits: [
           ...[...this.waits.values()].map((w) => w.record),
           ...[...this.fileWaits.values()].map((w) => w.record),
+          ...[...this.reminders.values()].map((w) => w.record),
         ],
       };
     const id = parseOrThrow("waitStatus", sc.nonEmptyText, waitId);
-    const wait = this.waits.get(id) ?? this.fileWaits.get(id);
+    const wait =
+      this.waits.get(id) ?? this.fileWaits.get(id) ?? this.reminders.get(id);
     if (!wait)
       throw new Error(
         `waitStatus: wait_id ${JSON.stringify(waitId)} is not owned by this cowbell process`,
@@ -340,11 +429,18 @@ export class WaitRegistry {
         }),
       input,
     );
-    let doomed: Array<LiveWait | LiveFileWait>;
+    let doomed: Array<LiveWait | LiveFileWait | LiveReminder>;
     if (v.all === true)
-      doomed = [...this.waits.values(), ...this.fileWaits.values()];
+      doomed = [
+        ...this.waits.values(),
+        ...this.fileWaits.values(),
+        ...this.reminders.values(),
+      ];
     else {
-      const hit = this.waits.get(v.wait_id!) ?? this.fileWaits.get(v.wait_id!);
+      const hit =
+        this.waits.get(v.wait_id!) ??
+        this.fileWaits.get(v.wait_id!) ??
+        this.reminders.get(v.wait_id!);
       if (!hit)
         throw new Error(
           `waitCancel: wait_id ${JSON.stringify(v.wait_id)} is not owned by this cowbell process`,
@@ -352,7 +448,10 @@ export class WaitRegistry {
       doomed = [hit];
     }
     for (const wait of doomed) {
-      if (isLiveFileWait(wait)) {
+      if (isLiveReminder(wait)) {
+        this.reminderTeardown(wait);
+        this.reminders.delete(wait.record.wait_id);
+      } else if (isLiveFileWait(wait)) {
         this.fileTeardown(wait);
         this.fileWaits.delete(wait.record.wait_id);
       } else {
@@ -400,12 +499,14 @@ export class WaitRegistry {
     return this.drainNext(!woke);
   }
 
-  /** Owned waits still in state pending, either kind. */
+  /** Owned waits still in state pending, any kind. */
   private pendingCount(): number {
     let n = 0;
     for (const w of this.waits.values())
       if (w.record.state === "pending") n += 1;
     for (const w of this.fileWaits.values())
+      if (w.record.state === "pending") n += 1;
+    for (const w of this.reminders.values())
       if (w.record.state === "pending") n += 1;
     return n;
   }
@@ -431,6 +532,130 @@ export class WaitRegistry {
   private emitTerminal(record: WaitRecord): void {
     this.terminalEvents.push(record);
     this.parkedNext.shift()?.();
+  }
+
+  /**
+   * Arm a SCHEDULED REMINDER: at fire_at_ms inject `text` into the
+   * target session (the calling session by default — resolved at the
+   * MCP layer from explicit param or request _meta) via the injected
+   * session.prompt seam. Exactly one of in_ms | at_ms; at_ms must be
+   * strictly future (an honest start error beats a silently-past
+   * reminder); until_ms defaults to started + 7 days and must bound
+   * the fire. Phase-2 scaffolding arms ONE-SHOTS: every_ms fails the
+   * start with a pointer to the fleet wave (loud, not half-armed),
+   * and a failed injection records state "failed" after a single
+   * attempt — the bounded retry ladder is R2's unit.
+   */
+  reminderStart(input: {
+    session: string;
+    text: string;
+    in_ms?: number;
+    at_ms?: number;
+    every_ms?: number;
+    until_ms?: number;
+    delivery?: "steer" | "queue";
+  }): ReminderRecord {
+    const session = parseOrThrow("reminderStart", sessionId, input.session);
+    const text = parseOrThrow("reminderStart", z.string().min(1), input.text);
+    const schedule = parseOrThrow(
+      "reminderStart",
+      z
+        .object({
+          in_ms: z.number().int().positive().optional(),
+          at_ms: z.number().int().positive().optional(),
+          every_ms: z.number().int().min(60_000).optional(),
+          until_ms: z.number().int().positive().optional(),
+        })
+        .strict()
+        .refine((x) => (x.in_ms !== undefined) !== (x.at_ms !== undefined), {
+          message:
+            "pass exactly one of in_ms (relative) or at_ms (absolute epoch ms)",
+        }),
+      {
+        in_ms: input.in_ms,
+        at_ms: input.at_ms,
+        every_ms: input.every_ms,
+        until_ms: input.until_ms,
+      },
+    );
+    if (schedule.every_ms !== undefined)
+      throw new Error(
+        "reminderStart: recurring reminders (every_ms) land with the fleet wave — phase-2 scaffolding arms one-shots only",
+      );
+    if (this.opts.inject === undefined)
+      throw new Error(
+        "reminderStart: no injection seam configured (this registry was built without opts.inject)",
+      );
+    const now = Date.now();
+    const fireAt =
+      schedule.in_ms !== undefined ? now + schedule.in_ms : schedule.at_ms!;
+    if (fireAt <= now)
+      throw new Error(
+        "reminderStart: at_ms must be strictly in the future (a past fire time is never silently immediate)",
+      );
+    const until = schedule.until_ms ?? now + DEFAULT_REMINDER_LIFETIME_MS;
+    if (until <= fireAt)
+      throw new Error(
+        "reminderStart: until_ms must bound the fire from above (after fire time)",
+      );
+    const delivery = input.delivery ?? "steer";
+    const wait: LiveReminder = {
+      record: reminderRecordSchema.parse({
+        wait_id: `wait_${randomUUID()}`,
+        kind: "reminder",
+        target: session,
+        text,
+        delivery,
+        fire_at_ms: fireAt,
+        until_ms: until,
+        state: "pending",
+        fired_count: 0,
+        started_ms: now,
+      }),
+    };
+    this.reminders.set(wait.record.wait_id, wait);
+    // Same discipline as the other kinds' deadlines: set EXACTLY ONCE.
+    // NOT unref'd — a pending reminder is a client-facing deadline.
+    wait.timer = setTimeout(() => void this.fireReminder(wait), fireAt - now);
+    return wait.record;
+  }
+
+  /**
+   * The terminal fire action: inject the prompt, record the outcome,
+   * notify wait_next. One attempt per fire in phase 2; R2 replaces
+   * the catch arm with the bounded retry ladder (2 retries @30s
+   * before "failed") and adds the recurring re-arm.
+   */
+  private async fireReminder(wait: LiveReminder): Promise<void> {
+    if (wait.record.state !== "pending") return;
+    const inject = this.opts.inject!;
+    try {
+      await inject(wait.record.target, wait.record.text, {
+        delivery: wait.record.delivery,
+      });
+      wait.record = {
+        ...wait.record,
+        state: "fired",
+        fired_count: wait.record.fired_count + 1,
+        last_fired_ms: Date.now(),
+      };
+    } catch (err) {
+      wait.record = {
+        ...wait.record,
+        state: "failed",
+        reason: `injection failed: ${errorMessage(err)}`,
+      };
+    }
+    this.reminderTeardown(wait);
+    this.emitTerminal(wait.record);
+  }
+
+  /** Terminal teardown for reminders: the fire timer. */
+  private reminderTeardown(wait: LiveReminder): void {
+    if (wait.timer !== undefined) {
+      clearTimeout(wait.timer);
+      wait.timer = undefined;
+    }
   }
 
   /**
@@ -707,9 +932,18 @@ function statusOf(entry: AgentEntry): AgentStatus {
     : "unknown";
 }
 
-/** Discriminate the two live-wait kinds sharing this registry. */
-function isLiveFileWait(w: LiveWait | LiveFileWait): w is LiveFileWait {
+/** Discriminate the live kinds sharing this registry (three now). */
+function isLiveFileWait(
+  w: LiveWait | LiveFileWait | LiveReminder,
+): w is LiveFileWait {
   return "markerRe" in w;
+}
+
+/** LiveWait carries `attempts`; LiveFileWait carries `markerRe`; a reminder carries neither. */
+function isLiveReminder(
+  w: LiveWait | LiveFileWait | LiveReminder,
+): w is LiveReminder {
+  return !("markerRe" in w) && !("attempts" in w);
 }
 
 /** First line matching the marker regex — the reported matched line. */

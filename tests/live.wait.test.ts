@@ -87,6 +87,7 @@ describe.skipIf(!hasHerdr || !ownPane || !ownStatus)(
         expect(["timed_out", "fired"]).toContain(state);
       });
       const after = one(waits, rec.wait_id);
+      if (!("until" in after)) throw new Error("expected a status wait");
       if (after.state === "timed_out") expect(after.result).toBeUndefined();
       else expect(notNow).toContain(after.result);
     });

@@ -202,6 +202,77 @@ export type FileWaitStartParams = {
   timeout_ms: number;
 };
 
+/**
+ * reminder_start's REGISTERED input shape — the scheduled
+ * self-reminder. No transport params: the injection target is an
+ * opencode session on THIS machine's background service, and the
+ * registry that arms the timer is THIS process's.
+ */
+export const reminderStartShape = {
+  text: z
+    .string()
+    .min(1)
+    .describe(
+      "The prompt INJECTED into the target session at fire time — it mutates that session's conversation; " +
+        "make it a self-descriptive directive, e.g. 'reminder: check wait_status and evaluate finished deliverables'",
+    ),
+  in_ms: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Relative delay in ms — pass exactly one of in_ms | at_ms"),
+  at_ms: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe(
+      "Absolute epoch-ms fire time, strictly in the future — pass exactly one of in_ms | at_ms",
+    ),
+  every_ms: z
+    .number()
+    .int()
+    .min(60_000)
+    .optional()
+    .describe(
+      "Recurring cadence in ms (floor 1 min) — recurring reminders land with the fleet wave; " +
+        "phase-2 scaffolding arms one-shots only and rejects every_ms loudly",
+    ),
+  until_ms: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe(
+      "Hard end bound in epoch ms (default: started_ms + 7 days); must be after the fire time",
+    ),
+  session_id: z
+    .string()
+    .regex(/^ses_[A-Za-z0-9]+$/, "session id must look like ses_...")
+    .optional()
+    .describe(
+      "Override the reminder target (an opencode ses_... id). Default: the CALLING session, " +
+        "resolved from the request's ai.opencode/sessionID meta — pass this to remind another session",
+    ),
+  delivery: z
+    .enum(["steer", "queue"])
+    .optional()
+    .describe(
+      "How the prompt lands at fire time: steer (default — starts a turn on an idle session, " +
+        "steers a busy one's in-flight turn) or queue (waits out the current turn; not a wakeup)",
+    ),
+};
+export type ReminderStartParams = {
+  text: string;
+  in_ms?: number;
+  at_ms?: number;
+  every_ms?: number;
+  until_ms?: number;
+  session_id?: string;
+  delivery?: "steer" | "queue";
+};
+
 export type StartParams = TransportParams & {
   name: string;
   kind: AgentKind;

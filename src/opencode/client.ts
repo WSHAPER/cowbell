@@ -140,6 +140,25 @@ export async function fetchModels(
   });
 }
 
+/**
+ * Fire-time half of reminder_start: submit a prompt into a session
+ * via the pinned session.prompt operation (steer delivery by default
+ * — see spec.sessionPrompt). The CLI exiting 0 IS the success signal;
+ * the response body is deliberately NOT pinned yet (the drift rig
+ * owns that once a fixture is captured), and any failure surfaces as
+ * OpenCodeApiError with the last stderr line.
+ */
+export async function injectPrompt(
+  session: string,
+  text: string,
+  opts: { delivery?: spec.PromptDelivery } = {},
+  exec: ExecFn = execOpenCode,
+): Promise<{ delivered: true }> {
+  const s: spec.ApiSpec = spec.sessionPrompt(session, text, opts.delivery);
+  await exec(s.argv);
+  return { delivered: true };
+}
+
 function normalize(m: oc.RawMessage): oc.TranscriptMessage {
   const out: oc.TranscriptMessage = {
     id: m.id,
