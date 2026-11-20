@@ -31,7 +31,7 @@ No params means the local herdr session (always the default). Pass `machine: "<l
 2. Call `agent_messages` on that pane — expect `channel: "structured"` and normalized turns.
 3. Call it on a pane-level agent (no `agent_session`) — expect `channel: "pane_fallback"` with a `reason`.
 
-When opencode's API drifts, `npm run reference:opencode` re-captures the operation fixture and the drift suite names the token. Same for the model surface: `npm run reference:opencode-models`.
+When opencode's API drifts, `npm run reference:opencode` re-captures the operation fixture and the drift suite names the token. Same for the model surface: `npm run reference:opencode-models`, and for the reminder fire action (the `session.prompt` POST): `npm run reference:opencode-reminder`.
 
 ## Model selection (agent_start model + models_list)
 

@@ -69,17 +69,20 @@ export function registerWaitTools(
     "wait_next",
     "BLOCK until at least one wait owned by THIS cowbell process reaches a terminal state (fired | " +
       "timed_out | failed), then return the batch — the completion NOTIFICATION channel for wait_start/" +
-      "file_wait_start. MCP servers cannot push into an opencode session (server->client notifications are " +
-      "dropped; anomalyco/opencode#48855), so THIS TOOL RESULT IS THE WAKE-UP: park one call instead of " +
-      "polling wait_status or spawning background `herdr agent wait` shells. Returns immediately when " +
-      "terminal events are already undelivered, or with {events: [], pending: 0} when no waits are pending " +
-      "(nothing can ever fire). Parking is event-driven (zero wake-ups between transitions); timeout_ms is " +
-      "REQUIRED and bounds only THIS call — expiry returns {events: [], pending: N, timed_out: true}, the " +
-      "cue to call again. Events (full wait records, either kind) are DRAINED — each terminal record is " +
-      "delivered to exactly one wait_next call; wait_status remains the full-state view. wait_cancel emits " +
-      "nothing (cancelled waits are simply forgotten). opencode holds tool calls open for up to 12h " +
-      "(execution timeout), so a long park is safe. Session-owned like every wait: machine/remote do not " +
-      "apply.",
+      "file_wait_start/reminder_start. MCP servers cannot push into an opencode session (server->client " +
+      "notifications are dropped; anomalyco/opencode#48855), so THIS TOOL RESULT IS THE WAKE-UP: park one " +
+      "call instead of polling wait_status or spawning background `herdr agent wait` shells. Returns " +
+      "immediately when terminal events are already undelivered, or with {events: [], pending: 0} when no " +
+      "waits are pending (nothing can ever fire). Parking is event-driven (zero wake-ups between " +
+      "transitions); timeout_ms is REQUIRED and bounds only THIS call — expiry returns {events: [], " +
+      "pending: N, timed_out: true}, the cue to call again. Events (full wait records, any of the three " +
+      "kinds) are DRAINED — each terminal record is delivered to exactly one wait_next call. Reminder " +
+      "terminals arrive here like any other: fired once the injection landed (or failed after its " +
+      "bounded retries) — the injected prompt is the target session's wakeup, the drained event is " +
+      "this side's receipt. wait_status remains the full-state view. wait_cancel emits nothing " +
+      "(cancelled waits are simply forgotten). opencode holds tool calls open for up to 12h " +
+      "(execution timeout), so a long park is safe. Session-owned like every wait: machine/remote do " +
+      "not apply.",
     waitNextShape,
     async (v: WaitNextParams) => json(await waits.waitNext(v.timeout_ms)),
   );
@@ -90,14 +93,21 @@ export function registerWaitTools(
 function registerWaitQueryTools(server: McpServer, waits: WaitRegistry): void {
   server.tool(
     "wait_status",
-    "Report one wait (pass wait_id) or every wait owned by THIS cowbell process (omit it): " +
-      "{wait_id, target, pane_id, until, state: pending|fired|timed_out, result?, started_ms} for " +
-      "status waits; {wait_id, target (path), marker, stability_ms, timeout_ms, state, result?, " +
-      "reason?, started_ms} for file waits (file_wait_start). fired carries result (the status that " +
-      "fired, or {line, mtime_ms} for file waits); 'failed' (file waits only) carries reason — the " +
-      "watched file was deleted/unreadable; timed_out carries none. All state is in-memory in this " +
-      "process — waits owned by other sessions or cowbell instances are invisible by design (there " +
-      "is no registry on disk or in the herdr server), and everything is gone when the process dies.",
+    "Report one wait (pass wait_id) or every wait owned by THIS cowbell process (omit it) — all " +
+      "three kinds intermix in one list: {wait_id, target, pane_id, until, state: " +
+      "pending|fired|timed_out, result?, started_ms} for status waits; {wait_id, target (path), " +
+      "marker, stability_ms, timeout_ms, state, result?, reason?, started_ms} for file waits " +
+      "(file_wait_start); {wait_id, kind: 'reminder', target (ses_ session id), text, delivery, " +
+      "fire_at_ms, every_ms?, until_ms, state: pending|fired|failed, fired_count, last_fired_ms?, " +
+      "reason?, started_ms} for reminders (reminder_start). fired carries result (the status that " +
+      "fired, or {line, mtime_ms} for file waits; a reminder's receipt is fired_count/last_fired_ms " +
+      "— the injection itself landed in the target session); 'failed' carries reason for file waits " +
+      "(watched file deleted/unreadable) and reminders (the fire-time injection failed after its " +
+      "bounded retries) alike; timed_out carries none — and is UNREACHABLE for reminders: their " +
+      "bound is until_ms, and reaching it is a normal completion, not a timeout. All state is " +
+      "in-memory in this process — waits owned by other sessions or cowbell instances are invisible " +
+      "by design (there is no registry on disk or in the herdr server), and everything is gone when " +
+      "the process dies.",
     {
       wait_id: z
         .string()
@@ -110,11 +120,11 @@ function registerWaitQueryTools(server: McpServer, waits: WaitRegistry): void {
 
   server.tool(
     "wait_cancel",
-    "Cancel waits of either kind owned by THIS cowbell process — one ({wait_id}) or all ({all: " +
-      "true}), exactly one of the two. Cancelling closes the subscription/poller and forgets the " +
-      "wait (it disappears from wait_status; fired/timed_out/failed waits are simply forgotten). " +
-      "Never touches another process's or session's waits — ownership is process-scoped by " +
-      "construction.",
+    "Cancel waits of any kind owned by THIS cowbell process — one ({wait_id}) or all ({all: " +
+      "true}), exactly one of the two. Cancelling closes the subscription/poller/fire timer and " +
+      "forgets the wait (it disappears from wait_status; fired/timed_out/failed waits are simply " +
+      "forgotten). Never touches another process's or session's waits — ownership is process-scoped " +
+      "by construction.",
     {
       wait_id: z.string().min(1).optional(),
       all: z.boolean().optional(),

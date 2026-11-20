@@ -84,17 +84,18 @@ Add to your MCP client config:
 | `agent_rename`   | Rename an agent                                                                     |
 | `models_list`    | List local opencode models, default marked (discovery)                              |
 
-### Waits (session-owned)
+### Waits & reminders (session-owned)
 
-| Tool              | Description                                                                        |
-| ----------------- | ---------------------------------------------------------------------------------- |
-| `wait_start`      | Non-blocking wait until a status; returns `{wait_id}` (timeout REQUIRED)           |
-| `file_wait_start` | Non-blocking report-marker watch: file matches a regex AND is quiet `stability_ms` |
-| `wait_next`       | BLOCK until any owned wait terminates; the drained batch is the completion notice  |
-| `wait_status`     | One (`wait_id`) or all waits owned by THIS cowbell process                         |
-| `wait_cancel`     | Cancel one (`wait_id`) or all owned waits                                          |
+| Tool              | Description                                                                         |
+| ----------------- | ----------------------------------------------------------------------------------- |
+| `wait_start`      | Non-blocking wait until a status; returns `{wait_id}` (timeout REQUIRED)            |
+| `file_wait_start` | Non-blocking report-marker watch: file matches a regex AND is quiet `stability_ms`  |
+| `wait_next`       | BLOCK until any owned wait terminates; the drained batch is the completion notice   |
+| `wait_status`     | One (`wait_id`) or all waits owned by THIS cowbell process                          |
+| `wait_cancel`     | Cancel one (`wait_id`) or all owned waits                                           |
+| `reminder_start`  | Arm a scheduled self-reminder: at fire time cowbell injects `text` into the session |
 
-Every herdr-backed tool accepts optional `machine` or `remote` parameters (mutually exclusive). Without them, commands run against your local herdr session. Remote workspaces and agents are invisible in the local UI, so callers opt in per call. Exceptions: `models_list` (local opencode API) and the wait tools (local herdr events socket) take no transport params, and neither do the machine tools; the saved SSH-machine registry lives in the local herdr client by construction.
+Every herdr-backed tool accepts optional `machine` or `remote` parameters (mutually exclusive). Without them, commands run against your local herdr session. Remote workspaces and agents are invisible in the local UI, so callers opt in per call. Exceptions: `models_list` (local opencode API) and the wait/reminder tools (process-local — herdr events socket, watched files, or the local opencode service) take no transport params, and neither do the machine tools; the saved SSH-machine registry lives in the local herdr client by construction.
 
 ### Tabs
 
@@ -177,7 +178,7 @@ The `model` field is exactly the string `agent_start` wants (and `opencode mini 
 
 ### `wait_next`: the completion notification
 
-MCP servers cannot push into an opencode session — the client drops every server→client notification except logging (which only reaches the logger) and list-changed ([anomalyco/opencode#48855](https://github.com/anomalyco/opencode/issues/48855); progress notifications fare no better, [#24965](https://github.com/anomalyco/opencode/issues/24965)). So the tool result is the notification: `wait_next` **blocks the calling tool call** until at least one owned wait (either kind) reaches a terminal state (`fired`/`timed_out`/`failed`), then returns the whole drained batch of terminal records. The orchestrator parks **one** call instead of polling `wait_status` or spawning background `herdr agent wait` shells — no flaky CLI primitive in the loop, no silent notification loss, and the wake-up is protocol-guaranteed because the agent loop suspends on the in-flight tool call (opencode holds MCP tool calls open for up to 12h by default). Parking is event-driven (zero wake-ups between transitions); `timeout_ms` bounds only the call and expires with `{events: [], pending: N, timed_out: true}` — the cue to call again. Events are drained exactly once; `wait_status` remains the full-state view; `wait_cancel` emits nothing.
+MCP servers cannot push into an opencode session — the client drops every server→client notification except logging (which only reaches the logger) and list-changed ([anomalyco/opencode#48855](https://github.com/anomalyco/opencode/issues/48855); progress notifications fare no better, [#24965](https://github.com/anomalyco/opencode/issues/24965)). So the tool result is the notification: `wait_next` **blocks the calling tool call** until at least one owned wait (any kind) reaches a terminal state (`fired`/`timed_out`/`failed`), then returns the whole drained batch of terminal records. The orchestrator parks **one** call instead of polling `wait_status` or spawning background `herdr agent wait` shells — no flaky CLI primitive in the loop, no silent notification loss, and the wake-up is protocol-guaranteed because the agent loop suspends on the in-flight tool call (opencode holds MCP tool calls open for up to 12h by default). Parking is event-driven (zero wake-ups between transitions); `timeout_ms` bounds only the call and expires with `{events: [], pending: N, timed_out: true}` — the cue to call again. Events are drained exactly once; `wait_status` remains the full-state view; `wait_cancel` emits nothing.
 
 - **Direct socket subscription.** Waits subscribe to the local herdr socket's `pane.agent_status_changed` events (newline-delimited JSON over `~/.config/herdr/herdr.sock`, or `HERDR_SOCKET_PATH`) rather than shelling out to `herdr agent wait`; that CLI primitive hangs intermittently, so cowbell routes around it. The current status is checked first via an authoritative `agent.list` read (already-matched targets fire immediately, no subscription at all).
 - **`events_lost` handling.** Per herdr socket semantics, when a subscriber falls behind retained history the server sends an `events_lost` error and closes the connection. cowbell then resubscribes and reconciles from a fresh authoritative read; buffered events are never replayed, and the read is the truth after a gap. The same recovery covers plain stream death, and the deadline timer is never cleared during recovery (clearing it would resurrect the hang class).
@@ -195,6 +196,36 @@ MCP servers cannot push into an opencode session — the client drops every serv
 }
 ```
 
+## Scheduled self-reminders
+
+`reminder_start` arms the registry's third wait kind, whose terminal act is a mutation: at the fire time cowbell injects `text` into the target session via the opencode `session.prompt` API (`delivery: "steer"` by default — it starts a turn on an idle session and steers a busy one's in-flight turn). **The injected prompt IS the wakeup**: no MCP push channel reaches an opencode session (the [#48855](https://github.com/anomalyco/opencode/issues/48855) verdict behind `wait_next`), so a reminder routes around the protocol by becoming an ordinary user turn. This tool **mutates the target conversation on a timer — that is the feature**, not a side effect: it is the one wait whose completion lands inside a session instead of a tool result.
+
+- **Target: the calling session by default.** cowbell resolves the caller from the request's `ai.opencode/sessionID` meta (opencode's documented per-request identity channel — MCP-spawned cowbell processes get no session env); pass `session_id` explicitly to remind another session. Neither present fails the start with an honest error: a reminder that cannot resolve its target would only ever fail at fire time.
+- **Scheduling.** Exactly one of `in_ms` (relative) or `at_ms` (absolute epoch ms, strictly future — a past fire time is never silently immediate). Recurring `every_ms` (1-minute floor) re-arms after each fire; `until_ms` is the hard end bound, defaulting to started + 7 days — the Claude Code session-scoped scheduled-task expiry precedent.
+- **Same ownership doctrine as every wait.** The reminder lives in-memory in THIS cowbell process and dies with it: an opencode server restart or config reload drops pending reminders silently. A durability tier (opencode automations, v2.3.1+) is a deliberate follow-up, not a property of this tool — treat armed reminders as process-local intentions, not appointments.
+- **Fire failures are terminal, not silent.** A failed injection (e.g. the background service down at fire time) is retried on a bounded ladder, then records state `failed` + `reason` — visible in `wait_status`, drained by `wait_next` like any terminal event.
+
+Reminder records flow through the same registry as every wait — `kind: "reminder"`, `target` = the `ses_...` session id, listed intermixed by `wait_status`, disarmed by `wait_cancel`, terminals drained by `wait_next`. `timed_out` is unreachable for reminders: their bound is `until_ms`, and reaching it is a normal completion, not a timeout.
+
+```json
+// wait_status -> one reminder record:
+{
+  "wait_id": "wait_9d3a…",
+  "kind": "reminder",
+  "target": "ses_e09a1f975ffe3LgorEkqo5YRrZ",
+  "text": "reminder: check wait_status and evaluate finished deliverables",
+  "delivery": "steer",
+  "fire_at_ms": 1792178511227,
+  "until_ms": 1792782411227,
+  "state": "fired",
+  "fired_count": 1,
+  "last_fired_ms": 1792178511310,
+  "started_ms": 1792177611227
+}
+```
+
+The fleet pattern: arm `reminder_start`, then park `wait_next` — the drain returns when anything terminates, while the injected prompt is what wakes an idle orchestrator at the scheduled time.
+
 ## Drift detection
 
 ```
@@ -209,8 +240,10 @@ tests/herdr-events.drift.test.ts  cross-checks socket tokens vs fixture
 src/opencode/spec.ts            every opencode api call, single source
 tests/fixtures/opencode-session-message.json   captured operation
 tests/fixtures/opencode-models.json            captured model.list + model.default
-tests/opencode.drift.test.ts         cross-checks spec vs fixture
-tests/opencode.models.drift.test.ts  cross-checks model surface vs fixture
+tests/fixtures/opencode-session-prompt.json    captured session.prompt POST (the fire action)
+tests/opencode.drift.test.ts             cross-checks spec vs fixture
+tests/opencode.models.drift.test.ts      cross-checks model surface vs fixture
+tests/opencode.reminder.drift.test.ts    cross-checks prompt params/body vs fixture
 ```
 
 When herdr renames a flag or subcommand:

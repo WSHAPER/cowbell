@@ -1,0 +1,33 @@
+{
+  "operationId": "session.prompt",
+  "method": "post",
+  "path": "/api/session/{sessionID}/prompt",
+  "parameters": [
+    {
+      "name": "sessionID",
+      "in": "path",
+      "required": true
+    }
+  ],
+  "bodyRequired": true,
+  "bodySchemaPins": {
+    "bodyProperties": [
+      "id",
+      "text",
+      "files",
+      "agents",
+      "skills",
+      "metadata",
+      "delivery",
+      "resume"
+    ],
+    "requiredKeys": [
+      "text"
+    ],
+    "textMinLength": null,
+    "deliveryEnum": [
+      "steer",
+      "queue"
+    ]
+  }
+}

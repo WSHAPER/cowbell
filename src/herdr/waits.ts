@@ -126,10 +126,11 @@ export type FileWaitRecord = z.output<typeof fileWaitRecordSchema>;
 /**
  * The wait_status record contract (reminders — `target` is the ses_
  * session id the prompt is injected into). `kind` is the explicit
- * discriminator; fire_at_ms is computed once at start; until_ms is
- * the hard end bound (default started_ms + 7 days, the Claude Code
- * scheduled-task expiry precedent); fired_count/last_fired_ms track
- * recurring fire history.
+ * discriminator; fire_at_ms is the next scheduled fire (set once at
+ * start, advanced per recurring fire); until_ms is the hard end
+ * bound (default started_ms + 7 days, the Claude Code scheduled-task
+ * expiry precedent) — it gates SCHEDULING only and is never extended
+ * by a retry; fired_count/last_fired_ms track recurring fire history.
  */
 export const reminderRecordSchema = z
   .object({
@@ -187,11 +188,29 @@ const RESUBSCRIBE_BACKOFF_MS = [0, 100, 200, 400, 800, 1600, 2000];
  */
 const DEFAULT_REMINDER_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
 
+/** Reminder retry ladder: the initial attempt plus 2 spaced retries. */
+const REMINDER_ATTEMPT_LIMIT = 3;
+
+/** Default spacing between reminder injection retries (ms). */
+const DEFAULT_RETRY_DELAY_MS = 30_000;
+
 /** File-wait poll cadence: clamp(stability_ms / 5) into [50ms, 1s]. */
 const MIN_POLL_MS = 50;
 const MAX_POLL_MS = 1_000;
 const pollIntervalMs = (stabilityMs: number): number =>
   Math.min(MAX_POLL_MS, Math.max(MIN_POLL_MS, Math.round(stabilityMs / 5)));
+
+/**
+ * The next recurring slot after the one at `from`: the cadence grid,
+ * never a catch-up burst. A fire delivered late (slow injection, a
+ * retry ladder) SKIPS the missed slots forward to the first slot at
+ * or after `now` — one fire per wake, however many slots passed.
+ */
+function nextSlotMs(from: number, everyMs: number, now: number): number {
+  const slot = from + everyMs;
+  if (slot > now) return slot;
+  return slot + Math.ceil((now - slot) / everyMs) * everyMs;
+}
 
 const filePathInput = z
   .string()
@@ -222,15 +241,20 @@ interface LiveFileWait {
 }
 
 /**
- * A live REMINDER — one armed timer, one terminal fire action (the
- * session.prompt injection). Phase-2 scaffolding arms ONE-SHOTS only
- * (every_ms is rejected at start with a pointer to the fleet wave);
- * the recurring re-arm loop and the bounded retry ladder land with R2.
+ * A live REMINDER — one armed timer per fire cycle, one terminal
+ * fire action (the session.prompt injection), a bounded retry ladder
+ * when the injection fails, and (recurring, every_ms) a re-arm per
+ * successful fire: next fire_at = last slot + every_ms with missed
+ * slots skipped forward, until the next slot would pass until_ms.
  */
 interface LiveReminder {
   record: ReminderRecord;
-  /** Set EXACTLY ONCE per fire cycle; NOT unref'd (deadline precedent). */
+  /** The NEXT scheduled fire; set EXACTLY ONCE per cycle; NOT unref'd (deadline precedent). */
   timer?: ReturnType<typeof setTimeout>;
+  /** Injection attempts completed for the CURRENT fire (reset on delivery/re-arm). */
+  attempts: number;
+  /** A pending ladder retry, spaced retryDelayMs; unref'd machinery (the recover() precedent). */
+  retry?: ReturnType<typeof setTimeout>;
 }
 
 /** stat signature + content cache: what one poll tick observes per path. */
@@ -275,6 +299,12 @@ export interface WaitRegistryOpts {
    * can only ever fail at fire time.
    */
   inject?: ReminderInject;
+  /**
+   * Spacing between reminder injection retries in ms (default 30s).
+   * Tests shrink it to run the ladder fast; the MCP surface never
+   * sees it — same additive-seam posture as socketPath.
+   */
+  retryDelayMs?: number;
 }
 
 /** One registry per process — the ownership boundary itself. */
@@ -541,10 +571,15 @@ export class WaitRegistry {
    * session.prompt seam. Exactly one of in_ms | at_ms; at_ms must be
    * strictly future (an honest start error beats a silently-past
    * reminder); until_ms defaults to started + 7 days and must bound
-   * the fire. Phase-2 scaffolding arms ONE-SHOTS: every_ms fails the
-   * start with a pointer to the fleet wave (loud, not half-armed),
-   * and a failed injection records state "failed" after a single
-   * attempt — the bounded retry ladder is R2's unit.
+   * the first fire. One-shots fire once and complete. Recurring
+   * (every_ms) re-arms after each successful fire — next fire_at =
+   * last slot + every_ms, missed slots skipped forward, never a
+   * catch-up burst — and completes as terminal "fired" once the next
+   * slot would pass until_ms. The registry only requires every_ms to
+   * be a positive int: the 1-minute UX floor lives in the MCP shape,
+   * so tests can run the loop fast. A failed injection retries twice
+   * more spaced retryDelayMs (opts, default 30s) before the reminder
+   * records "failed" + reason.
    */
   reminderStart(input: {
     session: string;
@@ -557,31 +592,12 @@ export class WaitRegistry {
   }): ReminderRecord {
     const session = parseOrThrow("reminderStart", sessionId, input.session);
     const text = parseOrThrow("reminderStart", z.string().min(1), input.text);
-    const schedule = parseOrThrow(
-      "reminderStart",
-      z
-        .object({
-          in_ms: z.number().int().positive().optional(),
-          at_ms: z.number().int().positive().optional(),
-          every_ms: z.number().int().min(60_000).optional(),
-          until_ms: z.number().int().positive().optional(),
-        })
-        .strict()
-        .refine((x) => (x.in_ms !== undefined) !== (x.at_ms !== undefined), {
-          message:
-            "pass exactly one of in_ms (relative) or at_ms (absolute epoch ms)",
-        }),
-      {
-        in_ms: input.in_ms,
-        at_ms: input.at_ms,
-        every_ms: input.every_ms,
-        until_ms: input.until_ms,
-      },
-    );
-    if (schedule.every_ms !== undefined)
-      throw new Error(
-        "reminderStart: recurring reminders (every_ms) land with the fleet wave — phase-2 scaffolding arms one-shots only",
-      );
+    const schedule = reminderSchedule({
+      in_ms: input.in_ms,
+      at_ms: input.at_ms,
+      every_ms: input.every_ms,
+      until_ms: input.until_ms,
+    });
     if (this.opts.inject === undefined)
       throw new Error(
         "reminderStart: no injection seam configured (this registry was built without opts.inject)",
@@ -607,11 +623,15 @@ export class WaitRegistry {
         text,
         delivery,
         fire_at_ms: fireAt,
+        ...(schedule.every_ms !== undefined
+          ? { every_ms: schedule.every_ms }
+          : {}),
         until_ms: until,
         state: "pending",
         fired_count: 0,
         started_ms: now,
       }),
+      attempts: 0,
     };
     this.reminders.set(wait.record.wait_id, wait);
     // Same discipline as the other kinds' deadlines: set EXACTLY ONCE.
@@ -621,40 +641,97 @@ export class WaitRegistry {
   }
 
   /**
-   * The terminal fire action: inject the prompt, record the outcome,
-   * notify wait_next. One attempt per fire in phase 2; R2 replaces
-   * the catch arm with the bounded retry ladder (2 retries @30s
-   * before "failed") and adds the recurring re-arm.
+   * The fire action: inject the prompt (one attempt), then hand off
+   * to the delivered / retry arms. Also the ladder's re-entry — a
+   * pending retry calls back into here for the next attempt.
    */
   private async fireReminder(wait: LiveReminder): Promise<void> {
-    if (wait.record.state !== "pending") return;
-    const inject = this.opts.inject!;
+    if (wait.record.state !== "pending" || !this.reminderOwned(wait)) return;
     try {
-      await inject(wait.record.target, wait.record.text, {
+      await this.opts.inject!(wait.record.target, wait.record.text, {
         delivery: wait.record.delivery,
       });
-      wait.record = {
-        ...wait.record,
-        state: "fired",
-        fired_count: wait.record.fired_count + 1,
-        last_fired_ms: Date.now(),
-      };
     } catch (err) {
+      this.retryReminder(wait, err);
+      return;
+    }
+    this.reminderFired(wait);
+  }
+
+  /**
+   * A delivered injection: count it, then either re-arm the recurring
+   * cycle at its next slot or complete as terminal "fired" — one-shots,
+   * and recurring reminders whose next slot would pass until_ms.
+   * until_ms gates SCHEDULING: a fire scheduled in bounds still
+   * delivers even when its retry ladder spills past until_ms, and no
+   * retry ever extends until_ms itself.
+   */
+  private reminderFired(wait: LiveReminder): void {
+    if (!this.reminderOwned(wait)) return; // cancelled mid-injection
+    const now = Date.now();
+    wait.attempts = 0;
+    wait.record = {
+      ...wait.record,
+      fired_count: wait.record.fired_count + 1,
+      last_fired_ms: now,
+    };
+    const every = wait.record.every_ms;
+    const next =
+      every !== undefined
+        ? nextSlotMs(wait.record.fire_at_ms, every, now)
+        : undefined;
+    if (next === undefined || next > wait.record.until_ms) {
+      wait.record = { ...wait.record, state: "fired" };
+      this.reminderTeardown(wait);
+      this.emitTerminal(wait.record);
+      return;
+    }
+    // Recurring: still pending, advanced to the next slot — a NEW
+    // setTimeout per cycle, still set-exactly-once-per-cycle.
+    wait.record = { ...wait.record, state: "pending", fire_at_ms: next };
+    wait.timer = setTimeout(() => void this.fireReminder(wait), next - now);
+  }
+
+  /**
+   * A failed injection: retry twice more spaced retryDelayMs (opts,
+   * default 30s), then record "failed" + the last error. The retry
+   * timer is unref'd machinery (the recover() precedent) — a process
+   * that exits mid-ladder simply drops the reminder, like every wait.
+   */
+  private retryReminder(wait: LiveReminder, err: unknown): void {
+    if (!this.reminderOwned(wait)) return; // cancelled mid-injection
+    wait.attempts += 1;
+    if (wait.attempts >= REMINDER_ATTEMPT_LIMIT) {
       wait.record = {
         ...wait.record,
         state: "failed",
-        reason: `injection failed: ${errorMessage(err)}`,
+        reason: `injection failed after ${wait.attempts} attempts: ${errorMessage(err)}`,
       };
+      this.reminderTeardown(wait);
+      this.emitTerminal(wait.record);
+      return;
     }
-    this.reminderTeardown(wait);
-    this.emitTerminal(wait.record);
+    wait.retry = setTimeout(
+      () => void this.fireReminder(wait),
+      this.opts.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS,
+    );
+    wait.retry.unref();
   }
 
-  /** Terminal teardown for reminders: the fire timer. */
+  /** Still owned (cancel deletes; terminal records stay for wait_status). */
+  private reminderOwned(wait: LiveReminder): boolean {
+    return this.reminders.get(wait.record.wait_id) === wait;
+  }
+
+  /** Terminal teardown for reminders: the fire timer AND any pending retry. */
   private reminderTeardown(wait: LiveReminder): void {
     if (wait.timer !== undefined) {
       clearTimeout(wait.timer);
       wait.timer = undefined;
+    }
+    if (wait.retry !== undefined) {
+      clearTimeout(wait.retry);
+      wait.retry = undefined;
     }
   }
 
@@ -939,11 +1016,15 @@ function isLiveFileWait(
   return "markerRe" in w;
 }
 
-/** LiveWait carries `attempts`; LiveFileWait carries `markerRe`; a reminder carries neither. */
+/**
+ * Only a reminder's RECORD carries `kind` — LiveWait and LiveReminder
+ * both carry `attempts`, so the record (the honest tagged union) is
+ * what discriminates the third kind, never the live shape.
+ */
 function isLiveReminder(
   w: LiveWait | LiveFileWait | LiveReminder,
 ): w is LiveReminder {
-  return !("markerRe" in w) && !("attempts" in w);
+  return "kind" in w.record;
 }
 
 /** First line matching the marker regex — the reported matched line. */
@@ -1015,6 +1096,36 @@ function liveFileWait(
     // collapses to now, degrading gracefully to the full window.
     lastChange: Math.min(Date.now(), st.mtimeMs),
   };
+}
+
+/**
+ * Validate the scheduling keys once, loudly: exactly one of in_ms |
+ * at_ms; every_ms a positive int — the 1-minute UX floor lives in
+ * the MCP shape (src/mcp/shared.ts), the registry only demands
+ * positivity so tests can run the recurring loop fast.
+ */
+function reminderSchedule(input: {
+  in_ms?: number;
+  at_ms?: number;
+  every_ms?: number;
+  until_ms?: number;
+}): { in_ms?: number; at_ms?: number; every_ms?: number; until_ms?: number } {
+  return parseOrThrow(
+    "reminderStart",
+    z
+      .object({
+        in_ms: z.number().int().positive().optional(),
+        at_ms: z.number().int().positive().optional(),
+        every_ms: z.number().int().positive().optional(),
+        until_ms: z.number().int().positive().optional(),
+      })
+      .strict()
+      .refine((x) => (x.in_ms !== undefined) !== (x.at_ms !== undefined), {
+        message:
+          "pass exactly one of in_ms (relative) or at_ms (absolute epoch ms)",
+      }),
+    input,
+  );
 }
 
 function errorMessage(err: unknown): string {

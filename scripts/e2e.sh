@@ -30,3 +30,14 @@ else
   t1=$(date +%s%N)
   echo "WALL_MS=$(( (t1 - t0) / 1000000 ))"
 fi
+
+# Live reminder leg — a real reminder firing into a scratch opencode
+# session (session.prompt POST -> turn admitted -> cleanup). Self-skips
+# when opencode or its background service is absent, and skips (not
+# fails) on service-side model/auth errors, so CI without credentials
+# stays green. Costs one tiny model turn per run when it does fire.
+if command -v opencode >/dev/null 2>&1; then
+  npx vitest run tests/live.reminder.test.ts
+else
+  echo "live reminder leg: opencode not on PATH — skipped"
+fi

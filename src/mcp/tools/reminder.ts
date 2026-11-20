@@ -48,16 +48,19 @@ export function registerReminderTools(
       "into that opencode session via the session.prompt API (delivery steer by default — it starts a " +
       "turn on an idle session and lands in a busy one), which is what wakes you: no MCP push channel " +
       "exists (anomalyco/opencode#48855), the injected prompt IS the wakeup. Schedule: exactly one of " +
-      "in_ms (relative) | at_ms (absolute epoch ms, strictly future); recurring every_ms lands with the " +
-      "fleet wave. Target: the calling session by default (resolved from the request's " +
-      "ai.opencode/sessionID meta); pass session_id to remind another session. SESSION-OWNED like every " +
-      "wait: the reminder lives in-memory in THIS cowbell process and DIES WITH IT (an opencode server " +
-      "restart or config reload drops pending reminders) — a durability tier (opencode automations) is a " +
-      "deliberate follow-up, not a property of this tool. Returns the reminder record (wait_id — poll " +
-      "wait_status or drain wait_next; cancel via wait_cancel; kind 'reminder', target = the session id, " +
-      "until_ms hard end bound defaulting to started + 7 days). A failed fire (e.g. background service " +
-      "down at fire time) records state 'failed' + reason after its bounded retries. NOTE: this MUTATES " +
-      "the target conversation on a timer — that is the feature. machine/remote do not apply.",
+      "in_ms (relative) | at_ms (absolute epoch ms, strictly future); recurring every_ms (1-minute " +
+      "floor) re-arms after each fire; until_ms is the hard end bound, defaulting to started + 7 days " +
+      "(the Claude Code session-scoped scheduled-task expiry precedent). Target: the calling session " +
+      "by default (resolved from the request's ai.opencode/sessionID meta); pass session_id to remind " +
+      "another session; neither present fails the start — a reminder that cannot resolve its target " +
+      "would only ever fail at fire time. SESSION-OWNED like every wait: the reminder lives in-memory " +
+      "in THIS cowbell process and DIES WITH IT (an opencode server restart or config reload drops " +
+      "pending reminders) — a durability tier (opencode automations) is a deliberate follow-up, not a " +
+      "property of this tool. Returns the reminder record (wait_id — poll wait_status or drain " +
+      "wait_next; cancel via wait_cancel; kind 'reminder', target = the session id). A failed fire " +
+      "(e.g. background service down at fire time) records state 'failed' + reason after its bounded " +
+      "retries. NOTE: this MUTATES the target conversation on a timer — that is the feature. " +
+      "machine/remote do not apply.",
     reminderStartShape,
     (v: ReminderStartParams, extra: { _meta?: Record<string, unknown> }) =>
       json(

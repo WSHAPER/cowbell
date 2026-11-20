@@ -2,8 +2,12 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { fetchMessages, OpenCodeApiError } from "../src/opencode/client.js";
-import { messageList } from "../src/opencode/spec.js";
+import {
+  fetchMessages,
+  injectPrompt,
+  OpenCodeApiError,
+} from "../src/opencode/client.js";
+import { messageList, sessionPrompt } from "../src/opencode/spec.js";
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const sample = readFileSync(
@@ -131,5 +135,42 @@ describe("fetchMessages failure modes", () => {
         throw new Error("Command failed: opencode api ... HTTP 404");
       }),
     ).rejects.toThrow();
+  });
+});
+
+describe("injectPrompt", () => {
+  it("forwards the pinned argv verbatim and reports delivery", async () => {
+    let seen: string[] = [];
+    const res = await injectPrompt(
+      "ses_fixture0001AAAA",
+      "wake up!",
+      {},
+      async (argv) => {
+        seen = argv;
+        return "{}";
+      },
+    );
+    expect(seen).toEqual(sessionPrompt("ses_fixture0001AAAA", "wake up!").argv);
+    expect(res).toEqual({ delivered: true });
+  });
+
+  it("delivery rides through to the --data payload", async () => {
+    let seen: string[] = [];
+    await injectPrompt("ses_x", "t", { delivery: "queue" }, async (argv) => {
+      seen = argv;
+      return "{}";
+    });
+    expect(seen.at(-1)).toBe('{"text":"t","delivery":"queue"}');
+  });
+
+  it("exec failure (execOpenCode wraps non-zero exits) propagates", async () => {
+    await expect(
+      injectPrompt("ses_x", "t", {}, async () => {
+        throw new OpenCodeApiError(
+          "opencode session.prompt",
+          "HTTP 404 Not Found",
+        );
+      }),
+    ).rejects.toThrow(OpenCodeApiError);
   });
 });

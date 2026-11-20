@@ -236,8 +236,10 @@ export const reminderStartShape = {
     .min(60_000)
     .optional()
     .describe(
-      "Recurring cadence in ms (floor 1 min) — recurring reminders land with the fleet wave; " +
-        "phase-2 scaffolding arms one-shots only and rejects every_ms loudly",
+      "Recurring cadence in ms (floor 1 min): re-arms after each successful fire on the " +
+        "cadence grid (missed slots skip forward, never burst) and completes as terminal " +
+        "'fired' once the next slot would pass until_ms; a fire whose retries all fail " +
+        "records 'failed' and stops (never hammer a dead session)",
     ),
   until_ms: z
     .number()

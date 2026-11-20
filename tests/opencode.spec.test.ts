@@ -41,6 +41,30 @@ describe("opencode argv pins", () => {
       "model.default",
     ]);
   });
+
+  it("sessionPrompt: sessionID param + text/delivery riding as --data JSON, steer default", () => {
+    expect(oc.sessionPrompt("ses_fixture0001AAAA", "wake up!").argv).toEqual([
+      "opencode",
+      "api",
+      "session.prompt",
+      "--param",
+      "sessionID=ses_fixture0001AAAA",
+      "--data",
+      '{"text":"wake up!","delivery":"steer"}',
+    ]);
+  });
+
+  it("sessionPrompt: explicit queue delivery swaps the --data payload only", () => {
+    expect(oc.sessionPrompt("ses_x", "t", "queue").argv).toEqual([
+      "opencode",
+      "api",
+      "session.prompt",
+      "--param",
+      "sessionID=ses_x",
+      "--data",
+      '{"text":"t","delivery":"queue"}',
+    ]);
+  });
 });
 
 describe("opencode input validation", () => {
@@ -51,6 +75,17 @@ describe("opencode input validation", () => {
   it("session ids must look like ses_...", () => {
     rejects(() => oc.messageList("w36:p1"), "messageList");
     rejects(() => oc.messageList(""), "messageList");
+  });
+
+  it("sessionPrompt: session ids must look like ses_..., text non-empty, delivery steer|queue", () => {
+    rejects(() => oc.sessionPrompt("w36:p1", "t"), "sessionPrompt");
+    rejects(() => oc.sessionPrompt("", "t"), "sessionPrompt");
+    rejects(() => oc.sessionPrompt("ses_x", ""), "sessionPrompt");
+    rejects(
+      () => oc.sessionPrompt("ses_x", "t", "later" as unknown as "steer"),
+      "sessionPrompt",
+    );
+    expect(() => oc.sessionPrompt("ses_x", "t", "queue")).not.toThrow();
   });
 
   it("limit is 1..200, order is asc|desc", () => {

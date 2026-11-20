@@ -9,10 +9,12 @@ import { parseOrThrow as v } from "../parse.js";
  * its routes via `opencode api GET /openapi.json`; the drift fixtures
  * (tests/fixtures/opencode-session-message.json from
  * scripts/dump-opencode-surface.sh, tests/fixtures/opencode-models.json
- * from scripts/dump-opencode-models.sh) pin the session.message.list
- * and model.list/model.default operations so renames fail the suite,
- * not the fleet. The CLI itself handles background-service
- * discovery + auth.
+ * from scripts/dump-opencode-models.sh, and
+ * tests/fixtures/opencode-session-prompt.json from
+ * scripts/dump-opencode-reminder.sh) pin the session.message.list,
+ * model.list/model.default, and session.prompt operations so renames
+ * fail the suite, not the fleet. The CLI itself handles
+ * background-service discovery + auth.
  */
 
 /**
