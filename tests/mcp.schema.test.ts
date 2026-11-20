@@ -174,3 +174,36 @@ describe("agentStart arity guard", () => {
     expect(argv).toContain("--");
   });
 });
+
+/**
+ * The wait_next notification channel: the registered shape must
+ * declare timeout_ms as REQUIRED (a missing key fails the parse —
+ * the park must never be unbounded), carry no transport params (the
+ * registry is process-local), and the registration must use the
+ * shared exported shape, not an inline replica (the F1 lesson).
+ */
+describe("MCP schema layer: wait_next declares a REQUIRED bounded park", () => {
+  it("the registered shape requires timeout_ms and declares nothing else", async () => {
+    const { z } = await import("zod");
+    const { waitNextShape } = await import("../src/mcp/shared.js");
+    const schema = z.object(waitNextShape);
+    expect(() => schema.parse({})).toThrow(); // REQUIRED: the park is never unbounded
+    expect(schema.parse({ timeout_ms: 5_000 })).toEqual({ timeout_ms: 5_000 });
+    expect(() => schema.parse({ timeout_ms: 0 })).toThrow(); // positive int
+    expect(Object.keys(waitNextShape)).toEqual(["timeout_ms"]); // no transport params
+  });
+
+  it("wait.ts registers wait_next via the shared shape (compile-linked)", async () => {
+    const fs = await import("node:fs");
+    const src = fs.readFileSync(
+      new URL("../src/mcp/tools/wait.ts", import.meta.url),
+      "utf8",
+    );
+    const block = src.slice(
+      src.indexOf('"wait_next"'),
+      src.indexOf("registerWaitQueryTools"),
+    );
+    expect(block).toContain("waitNextShape");
+    expect(block).not.toContain("withT");
+  });
+});

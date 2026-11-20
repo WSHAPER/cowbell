@@ -9,6 +9,7 @@ export default tseslint.config(
       ".reference",
       "coverage",
       "scripts",
+      "tmp",
       "eslint.config.js",
     ],
   },

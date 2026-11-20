@@ -90,6 +90,7 @@ Add to your MCP client config:
 | ----------------- | ---------------------------------------------------------------------------------- |
 | `wait_start`      | Non-blocking wait until a status; returns `{wait_id}` (timeout REQUIRED)           |
 | `file_wait_start` | Non-blocking report-marker watch: file matches a regex AND is quiet `stability_ms` |
+| `wait_next`       | BLOCK until any owned wait terminates; the drained batch is the completion notice  |
 | `wait_status`     | One (`wait_id`) or all waits owned by THIS cowbell process                         |
 | `wait_cancel`     | Cancel one (`wait_id`) or all owned waits                                          |
 
@@ -173,6 +174,11 @@ The `model` field is exactly the string `agent_start` wants (and `opencode mini 
 - **In-memory, per-process, nothing else.** All wait state lives inside one cowbell instance: no files, no daemon, no durability. When the process dies, its waits die with it: an orchestrator's `pkill` can never touch another session's waits, and stale waits can never accumulate anywhere. Cross-session invisibility is the point: `wait_status` reports exactly what THIS process owns.
 - **Non-blocking by design.** `wait_start` returns `{wait_id}` immediately; poll `wait_status` (states: `pending | fired | timed_out`, `result` carries the status that fired). It is not a queue: no ordering, no priority, no delivery semantics; just owned status observation.
 - `timeout_ms` is **required** and enforced client-side; no wait can outlive its deadline, no matter what the transport does.
+
+### `wait_next`: the completion notification
+
+MCP servers cannot push into an opencode session — the client drops every server→client notification except logging (which only reaches the logger) and list-changed ([anomalyco/opencode#48855](https://github.com/anomalyco/opencode/issues/48855); progress notifications fare no better, [#24965](https://github.com/anomalyco/opencode/issues/24965)). So the tool result is the notification: `wait_next` **blocks the calling tool call** until at least one owned wait (either kind) reaches a terminal state (`fired`/`timed_out`/`failed`), then returns the whole drained batch of terminal records. The orchestrator parks **one** call instead of polling `wait_status` or spawning background `herdr agent wait` shells — no flaky CLI primitive in the loop, no silent notification loss, and the wake-up is protocol-guaranteed because the agent loop suspends on the in-flight tool call (opencode holds MCP tool calls open for up to 12h by default). Parking is event-driven (zero wake-ups between transitions); `timeout_ms` bounds only the call and expires with `{events: [], pending: N, timed_out: true}` — the cue to call again. Events are drained exactly once; `wait_status` remains the full-state view; `wait_cancel` emits nothing.
+
 - **Direct socket subscription.** Waits subscribe to the local herdr socket's `pane.agent_status_changed` events (newline-delimited JSON over `~/.config/herdr/herdr.sock`, or `HERDR_SOCKET_PATH`) rather than shelling out to `herdr agent wait`; that CLI primitive hangs intermittently, so cowbell routes around it. The current status is checked first via an authoritative `agent.list` read (already-matched targets fire immediately, no subscription at all).
 - **`events_lost` handling.** Per herdr socket semantics, when a subscriber falls behind retained history the server sends an `events_lost` error and closes the connection. cowbell then resubscribes and reconciles from a fresh authoritative read; buffered events are never replayed, and the read is the truth after a gap. The same recovery covers plain stream death, and the deadline timer is never cleared during recovery (clearing it would resurrect the hang class).
 
