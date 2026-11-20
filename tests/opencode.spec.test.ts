@@ -41,7 +41,9 @@ describe("opencode argv pins", () => {
       "model.default",
     ]);
   });
+});
 
+describe("opencode argv pins (sessionPrompt — the fire action)", () => {
   it("sessionPrompt: sessionID param + text/delivery riding as --data JSON, steer default", () => {
     expect(oc.sessionPrompt("ses_fixture0001AAAA", "wake up!").argv).toEqual([
       "opencode",

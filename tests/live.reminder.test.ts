@@ -89,6 +89,53 @@ function asReminder(record: unknown): ReminderRecord {
 const SERVICE_SIDE_FAILURE =
   /model|provider|api[ _-]?key|auth|quota|429|5\d\d|timeout/i;
 
+/**
+ * Wait for the armed reminder to reach its terminal state. The record
+ * returned by reminderStart is a snapshot; waitStatus is the live view
+ * (fireReminder REPLACES the record object). Service-side failures
+ * (no model/auth) SKIP — record and move on, never burn retries.
+ */
+async function awaitFired(
+  waits: ReturnType<typeof createWaitRegistry>,
+  rec: ReturnType<ReturnType<typeof createWaitRegistry>["reminderStart"]>,
+  ctx: { skip(): void },
+): Promise<void> {
+  await vi.waitFor(
+    () => {
+      const live = asReminder(waits.waitStatus(rec.wait_id));
+      if (
+        live.state === "failed" &&
+        SERVICE_SIDE_FAILURE.test(live.reason ?? "")
+      )
+        ctx.skip();
+      expect(live.state, live.reason ?? "injection failed").toBe("fired");
+      expect(live.fired_count).toBe(1);
+      expect(live.last_fired_ms).toBeGreaterThanOrEqual(rec.fire_at_ms);
+    },
+    { timeout: 30_000 },
+  );
+}
+
+/**
+ * Wait for delivery: the reminder text must have landed as a USER
+ * message in the scratch session's transcript (turn admission).
+ */
+async function awaitDelivered(session: string): Promise<void> {
+  await vi.waitFor(
+    async () => {
+      const page = await fetchMessages(session);
+      const hit = page.messages.find(
+        (m) =>
+          m.role === "user" &&
+          typeof m.text === "string" &&
+          m.text.includes(REMINDER_TEXT),
+      );
+      expect(hit).toBeDefined();
+    },
+    { timeout: 10_000 },
+  );
+}
+
 describe.skipIf(!hasOpenCode)(
   "reminder live e2e (real opencode background service)",
   () => {
@@ -112,41 +159,8 @@ describe.skipIf(!hasOpenCode)(
           expect(rec.state).toBe("pending");
           expect(rec.target).toBe(session);
           expect(rec.fired_count).toBe(0);
-
-          // The returned record is a snapshot; waitStatus is the live
-          // view (fireReminder REPLACES the record object).
-          await vi.waitFor(
-            () => {
-              const live = asReminder(waits.waitStatus(rec.wait_id));
-              if (
-                live.state === "failed" &&
-                SERVICE_SIDE_FAILURE.test(live.reason ?? "")
-              )
-                ctx.skip();
-              expect(live.state, live.reason ?? "injection failed").toBe(
-                "fired",
-              );
-              expect(live.fired_count).toBe(1);
-              expect(live.last_fired_ms).toBeGreaterThanOrEqual(rec.fire_at_ms);
-            },
-            { timeout: 30_000 },
-          );
-
-          // Delivery: the reminder text must have landed as a USER
-          // message in the scratch session's transcript.
-          await vi.waitFor(
-            async () => {
-              const page = await fetchMessages(session);
-              const hit = page.messages.find(
-                (m) =>
-                  m.role === "user" &&
-                  typeof m.text === "string" &&
-                  m.text.includes(REMINDER_TEXT),
-              );
-              expect(hit).toBeDefined();
-            },
-            { timeout: 10_000 },
-          );
+          await awaitFired(waits, rec, ctx);
+          await awaitDelivered(session);
         } finally {
           try {
             await deleteScratchSession(session);

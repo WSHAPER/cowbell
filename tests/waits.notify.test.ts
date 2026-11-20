@@ -154,7 +154,9 @@ describe("wait_next: park and wake", () => {
     );
     expect(out.pending).toBe(0);
   });
+});
 
+describe("wait_next: park and wake (file-kind + park expiry)", () => {
   it("wakes when a FILE wait fires (marker written mid-park)", async () => {
     const path = join(dir, "report.md");
     await writeFile(path, "# Work log\n");

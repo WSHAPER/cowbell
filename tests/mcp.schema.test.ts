@@ -246,7 +246,9 @@ describe("MCP schema layer: reminder_start declares the frozen reminder contract
     expect(Object.keys(reminderStartShape)).toContain("delivery");
     expect(Object.keys(reminderStartShape)).toContain("session_id");
   });
+});
 
+describe("MCP schema layer: reminder_start registration + record pins", () => {
   it("reminder.ts registers reminder_start via the shared shape; server wires the seam", async () => {
     const fs = await import("node:fs");
     const src = fs.readFileSync(

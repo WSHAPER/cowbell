@@ -19,11 +19,10 @@ import type {
  * SESSION-OWNED waits — non-blocking status waits whose state lives
  * entirely in THIS cowbell process. Deliberately no transport params:
  * the herdr events socket is local-session-only.
+ *
+ * wait_start + file_wait_start: the two arming surfaces.
  */
-export function registerWaitTools(
-  server: McpServer,
-  waits: WaitRegistry,
-): void {
+function registerWaitStartTools(server: McpServer, waits: WaitRegistry): void {
   server.tool(
     "wait_start",
     "Start a NON-BLOCKING wait until an agent reaches one of the given statuses; returns " +
@@ -65,6 +64,10 @@ export function registerWaitTools(
         ),
       ),
   );
+}
+
+/** wait_next: the completion-notification park. */
+function registerWaitNextTool(server: McpServer, waits: WaitRegistry): void {
   server.tool(
     "wait_next",
     "BLOCK until at least one wait owned by THIS cowbell process reaches a terminal state (fired | " +
@@ -86,7 +89,6 @@ export function registerWaitTools(
     waitNextShape,
     async (v: WaitNextParams) => json(await waits.waitNext(v.timeout_ms)),
   );
-  registerWaitQueryTools(server, waits);
 }
 
 /** wait_status + wait_cancel: the observation/abandonment surface. */
@@ -131,4 +133,19 @@ function registerWaitQueryTools(server: McpServer, waits: WaitRegistry): void {
     },
     (v: WaitCancelParams) => Promise.resolve(json(waits.waitCancel(v))),
   );
+}
+
+/**
+ * The wait-family composition: arming (wait_start, file_wait_start),
+ * notification (wait_next), observation/abandonment (wait_status,
+ * wait_cancel). Defined last so the file reads bottom-up per kind;
+ * server.ts keeps its single registration entrypoint.
+ */
+export function registerWaitTools(
+  server: McpServer,
+  waits: WaitRegistry,
+): void {
+  registerWaitStartTools(server, waits);
+  registerWaitNextTool(server, waits);
+  registerWaitQueryTools(server, waits);
 }

@@ -96,7 +96,9 @@ describe("reminders: one-shot basics", () => {
     expect(calls).toHaveLength(1);
     expect(one(reg, rec.wait_id).state).toBe("fired");
   });
+});
 
+describe("reminders: one-shot scheduling forms (explicit + at_ms)", () => {
   it("an explicit session and delivery pass through verbatim", async () => {
     const { calls, inject } = recorder();
     const reg = createWaitRegistry({ inject });
@@ -207,7 +209,9 @@ describe("reminders: recurring (every_ms)", () => {
     await sleep(250); // past the would-be next slot: terminal means terminal
     expect(calls).toHaveLength(4);
   });
+});
 
+describe("reminders: recurring edges (MCP floor + missed slots)", () => {
   it("accepts every_ms below the MCP floor (the 60s UX floor lives in the MCP shape)", async () => {
     const { calls, inject } = recorder();
     const reg = createWaitRegistry({ inject });
@@ -277,7 +281,9 @@ describe("reminders: the retry ladder", () => {
     await sleep(150); // terminal: no fourth attempt
     expect(calls).toHaveLength(3);
   });
+});
 
+describe("reminders: the retry ladder (recovery + spacing)", () => {
   it("inject failing 2x then succeeding fires on the third attempt", async () => {
     const { calls, inject } = recorder((_, n) =>
       n <= 2 ? Promise.reject(new Error("flaky")) : Promise.resolve({}),
@@ -374,7 +380,9 @@ describe("reminders: cancel and notification", () => {
       timed_out: false,
     });
   });
+});
 
+describe("reminders: observation (status + next)", () => {
   it("wait_status lists and looks up reminders (terminal records stay reportable)", async () => {
     const { inject } = recorder();
     const reg = createWaitRegistry({ inject });

@@ -80,6 +80,10 @@ describe("opencode session.prompt drift", () => {
       ).toBe(true);
     }
   });
+});
+
+describe("opencode session.prompt drift (request-body pins)", () => {
+  const surface = loadSurface();
 
   it("--data body keys we emit are declared upstream properties", () => {
     for (const key of Object.keys(
